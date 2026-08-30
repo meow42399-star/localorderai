@@ -1,0 +1,368 @@
+package com.localorderai.services;
+
+import android.app.*;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.util.Log;
+import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
+import com.localorderai.R;
+import com.localorderai.data.*;
+import com.localorderai.utils.AutoRedialManager;
+
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * CampaignForegroundService
+ * -------------------------
+ * تطبيق اتصال تلقائي بسيط: بياخد قائمة الطلبات المعلّقة، ويتصل بكل رقم
+ * تلقائيًا (Auto Dial) واحد ورا التاني بالترتيب، من غير أي تكامل خارجي
+ * (لا واتساب ولا Gemini).
+ *
+ * FIX: قبل كده كانت processQueue بتلف على كل الطلبات في for loop عادي
+ * وبتنادي startAutoDialing() وترجع فورًا من غير ما تستنى، فكانت كل
+ * أرقام القائمة بتتبعت لـ AutoRedialManager في نفس اللحظة تقريبًا،
+ * وبعد أول محاولة اتصال كان الكامبين "يوقف" فعليًا لأن الـ loop
+ * خلص من زمان — وده اللي كان بيخلي المستخدم مضطر يدوس "بدء الحملة"
+ * تاني لكل رقم.
+ *
+ * دلوقتي: بنعالج رقم واحد بس في كل مرة، ومش بننتقل للرقم اللي بعده
+ * إلا لما AutoRedialManager يبلغ onFinished() (يعني الرقم ده خلص
+ * تمامًا: اتوصل، أو خلص أقصى عدد محاولات، أو اتوقف يدويًا).
+ */
+public class CampaignForegroundService extends Service {
+
+    private static final String TAG = "CampaignService";
+    private static final String CHANNEL_ID = "campaign_channel";
+    private static final int NOTIFICATION_ID = 1001;
+
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private AppDatabase db;
+    private AppConfig config;
+
+    private volatile boolean isCampaignRunning = false;
+    private List<OrderRecord> queue;
+    private int queueIndex = 0;
+    private int queueTotal = 0;
+    private String lastKnownCurrentName = null;
+    private String lastKnownCurrentPhone = null;
+
+    private AutoRedialManager currentRedial;
+
+    private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            stopCampaign();
+        }
+    };
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        db = AppDatabase.getInstance(this);
+        config = new AppConfig(this);
+
+        createNotificationChannel();
+
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                stopReceiver, new IntentFilter(com.localorderai.ui.CampaignProgressDialog.ACTION_STOP)
+        );
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification("جاري تشغيل الحملة..."));
+        } catch (Exception e) {
+            Log.e(TAG, "startForeground failed, stopping service safely", e);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        try {
+            if (intent != null && "STOP".equals(intent.getAction())) {
+                stopCampaign();
+                return START_NOT_STICKY;
+            }
+            if (intent != null && "SKIP".equals(intent.getAction())) {
+                skipCurrent();
+                return START_STICKY;
+            }
+            startCampaign();
+        } catch (Exception e) {
+            Log.e(TAG, "onStartCommand failed unexpectedly", e);
+            isCampaignRunning = false;
+        }
+
+        return START_STICKY;
+    }
+
+    private void startCampaign() {
+        if (isCampaignRunning) return;
+        isCampaignRunning = true;
+        config.setCampaignRunning(true);
+
+        executor.execute(() -> {
+            try {
+                List<OrderRecord> pending = db.orderRecordDao().getPendingRecords();
+                queue = pending != null ? pending : new java.util.ArrayList<>();
+                queueIndex = 0;
+                queueTotal = queue.size();
+
+                Log.d(TAG, "Processing " + queueTotal + " pending orders");
+                mainHandler.post(() -> updateNotification("عدد الطلبات المعلّقة: " + queueTotal));
+
+                if (queue.isEmpty()) {
+                    mainHandler.post(() -> updateNotification("لا توجد طلبات معلقة"));
+                    isCampaignRunning = false;
+                    config.setCampaignRunning(false);
+                    return;
+                }
+
+                broadcastProgress(queueTotal, 0, null, null, null, 0, 0, 0);
+                processNextInQueue();
+            } catch (Exception e) {
+                Log.e(TAG, "startCampaign crashed", e);
+                isCampaignRunning = false;
+            }
+        });
+    }
+
+    /**
+     * بيعالج الطلب اللي في queueIndex، وبعدين يستنى إشارة onFinished
+     * من AutoRedialManager قبل ما ينتقل للطلب اللي بعده. كده الكامبين
+     * كله بيمشي رقم ورا رقم من غير ما يحتاج تدخل يدوي.
+     */
+    private void processNextInQueue() {
+        if (!isCampaignRunning) return;
+
+        if (queue == null || queueIndex >= queue.size()) {
+            mainHandler.post(() -> updateNotification("انتهت الحملة"));
+            isCampaignRunning = false;
+            config.setCampaignRunning(false);
+            return;
+        }
+
+        OrderRecord record = queue.get(queueIndex);
+        lastKnownCurrentName = record.customerName;
+        lastKnownCurrentPhone = record.phoneNumber;
+        broadcastCurrentName(record.customerName);
+        startAutoDialing(record);
+    }
+
+    public void stopCampaign() {
+        isCampaignRunning = false;
+        config.setCampaignRunning(false);
+        if (currentRedial != null) {
+            currentRedial.stop();
+            currentRedial = null;
+        }
+        updateNotification("تم إيقاف الحملة");
+        stopForeground(true);
+        stopSelf();
+    }
+
+    /**
+     * بيتخطى الرقم الحالي فورًا (بيوقف محاولاته المتبقية) وينتقل
+     * للرقم اللي بعده في القائمة، من غير ما يوقف الحملة كلها.
+     * بينادى من تاب "الأرقام الحالية" لما المستخدم يدوس "تخطي الحالي".
+     */
+    public void skipCurrent() {
+        if (!isCampaignRunning || currentRedial == null) return;
+        Log.d(TAG, "Skipping current number by user request");
+        // stop() بتنادي onFinished(false) تلقائيًا، واللي بيتكفل
+        // بالانتقال للرقم اللي بعده عن طريق advanceQueue().
+        currentRedial.stop();
+    }
+
+    private void startAutoDialing(OrderRecord record) {
+        try {
+            if (record == null || record.phoneNumber == null) {
+                Log.w(TAG, "Cannot start auto-dialing: null record or phone");
+                advanceQueue();
+                return;
+            }
+
+            mainHandler.post(() -> updateNotification("جاري الاتصال بـ: " + record.customerName));
+            Log.d(TAG, "Starting auto-dialing for: " + record.customerName);
+
+            AutoRedialManager redial = new AutoRedialManager(
+                    getApplicationContext(),
+                    record.phoneNumber,
+                    config.getMaxAttempts(),
+                    config.getDelaySeconds()
+            );
+            currentRedial = redial;
+
+            redial.setListener(new AutoRedialManager.RedialListener() {
+                @Override
+                public void onAttemptStarted(int attemptNumber, int maxAttempts) {
+                    Log.d(TAG, "Auto-dial attempt " + attemptNumber + "/" + maxAttempts);
+                    mainHandler.post(() -> updateNotification(
+                            "اتصال تلقائي: " + record.customerName + " - محاولة " + attemptNumber));
+                    broadcastAutoDialProgress(attemptNumber, maxAttempts, config.getDelaySeconds());
+                    record.attempts = attemptNumber;
+                    safeUpdateRecord(record, OrderRecord.STATUS_PENDING);
+                }
+
+                @Override
+                public void onMaxAttemptsReached() {
+                    Log.d(TAG, "Max attempts reached for: " + record.customerName);
+                    safeUpdateRecord(record, OrderRecord.STATUS_FAILED);
+                }
+
+                @Override
+                public void onStopped() {
+                    Log.d(TAG, "Auto-dialing stopped for: " + record.customerName);
+                }
+
+                @Override
+                public void onFinished(boolean wasAnswered) {
+                    // الرقم ده خلص تمامًا (اتوصل أو خلص محاولاته) —
+                    // نحدث حالته النهائية وننتقل للرقم اللي بعده.
+                    safeUpdateRecord(record, wasAnswered ? OrderRecord.STATUS_CALLED : record.status);
+
+                    int processed = 0;
+                    try {
+                        processed = db.orderRecordDao().countProcessed();
+                    } catch (Exception e) {
+                        Log.e(TAG, "countProcessed failed", e);
+                    }
+
+                    broadcastProgress(
+                            queueTotal, processed,
+                            record.customerName,
+                            record.phoneNumber != null ? record.phoneNumber : "",
+                            record.status != null ? record.status : OrderRecord.STATUS_PENDING,
+                            config.getMaxAttempts(),
+                            config.getDelaySeconds(),
+                            record.attempts
+                    );
+
+                    advanceQueue();
+                }
+            });
+
+            OrderInCallService.injectRedialManager(redial);
+            redial.start();
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting auto-dialing", e);
+            safeUpdateRecord(record, OrderRecord.STATUS_FAILED);
+            advanceQueue();
+        }
+    }
+
+    private void advanceQueue() {
+        currentRedial = null;
+        queueIndex++;
+        executor.execute(this::processNextInQueue);
+    }
+
+    // ---------- helpers ----------
+
+    private void safeUpdateRecord(OrderRecord record, String status) {
+        try {
+            record.status = status;
+            record.lastUpdatedAt = new java.util.Date();
+            db.orderRecordDao().update(record);
+        } catch (Exception e) {
+            Log.e(TAG, "safeUpdateRecord failed for status=" + status, e);
+        }
+    }
+
+    private void broadcastProgress(int total, int processed, String currentName,
+                                    String lastPhone, String lastStatus,
+                                    int autoDialMax, int autoDialDelay, int autoDialAttempts) {
+        config.saveCampaignState(total, processed, currentName, lastPhone, autoDialAttempts, autoDialMax);
+
+        Intent b = new Intent(com.localorderai.ui.CampaignProgressDialog.ACTION_PROGRESS);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_TOTAL, total);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_PROCESSED, processed);
+        if (currentName != null) b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_CURRENT_NAME, currentName);
+        if (lastPhone != null) b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_LAST_PHONE, lastPhone);
+        if (lastStatus != null) b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_LAST_STATUS, lastStatus);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_MAX, autoDialMax);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_DELAY, autoDialDelay);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS, autoDialAttempts);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUDIO_STATUS,
+                "ميك: " + (config.isRecordingEnabled() ? "مفعّل" : "متوقّف") + " - مكبر: " + (config.isSpeakerEnabled() ? "مفعّل" : "متوقّف"));
+        LocalBroadcastManager.getInstance(this).sendBroadcast(b);
+    }
+
+    private void broadcastCurrentName(String name) {
+        config.saveCampaignState(queueTotal, queueIndex, name, null, 0, 0);
+
+        Intent b = new Intent(com.localorderai.ui.CampaignProgressDialog.ACTION_PROGRESS);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_CURRENT_NAME, name);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(b);
+    }
+
+    private void broadcastAutoDialProgress(int attempts, int max, int delay) {
+        config.saveCampaignState(queueTotal, queueIndex, lastKnownCurrentName, lastKnownCurrentPhone, attempts, max);
+
+        Intent b = new Intent(com.localorderai.ui.CampaignProgressDialog.ACTION_PROGRESS);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS, attempts);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_MAX, max);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_DELAY, delay);
+        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUDIO_STATUS,
+                "ميك: " + (config.isRecordingEnabled() ? "مفعّل" : "متوقّف") + " - مكبر: " + (config.isSpeakerEnabled() ? "مفعّل" : "متوقّف"));
+        LocalBroadcastManager.getInstance(this).sendBroadcast(b);
+    }
+
+    // ---------- Notification ----------
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "حملة الاتصال التلقائي",
+                    NotificationManager.IMPORTANCE_LOW
+            );
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.createNotificationChannel(channel);
+        }
+    }
+
+    private Notification buildNotification(String content) {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("LocalOrderAI")
+                .setContentText(content)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setOngoing(true)
+                .build();
+    }
+
+    private void updateNotification(String content) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, buildNotification(content));
+        }
+    }
+
+    @Nullable
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        isCampaignRunning = false;
+        currentRedial = null;
+        executor.shutdownNow();
+        try { LocalBroadcastManager.getInstance(this).unregisterReceiver(stopReceiver); } catch (Exception ignored) {}
+    }
+}

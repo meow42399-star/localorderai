@@ -36,6 +36,23 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!--
+                لازم Activity واحدة على الأقل تستقبل ACTION_DIAL عشان
+                التطبيق يبقى "مؤهل" (eligible) أساسًا يظهر كخيار في
+                شاشة "Default Phone App" بتاعة النظام. من غيرها،
+                ACTION_CHANGE_DEFAULT_DIALER بيفشل أو النظام بيرفض
+                التطبيق كخيار من الأساس، والحماية في startCampaign()
+                (فحص isDefaultDialerApp) بتبقى عديمة الفايدة عمليًا.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="tel" />
+            </intent-filter>
         </activity>
 
         <activity

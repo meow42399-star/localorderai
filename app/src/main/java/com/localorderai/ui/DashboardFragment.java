@@ -31,6 +31,7 @@ import com.localorderai.data.AppDatabase;
 import com.localorderai.data.OrderRecord;
 import com.localorderai.services.CampaignForegroundService;
 import com.localorderai.services.OverlayBubbleService;
+import com.localorderai.utils.UpdateManager;
 
 import java.util.concurrent.Executors;
 
@@ -50,9 +51,11 @@ public class DashboardFragment extends Fragment {
     private SwitchMaterial switchRecording, switchAutoDialing;
     private MaterialButtonToggleGroup toggleSimSlot;
     private TextView txtStatus, txtMaxAttemptsValue, txtDelayValue;
+    private TextView txtUpdateStatus;
 
     private AppConfig config;
     private AppDatabase db;
+    private UpdateManager updateManager;
 
     @Nullable
     @Override
@@ -67,6 +70,7 @@ public class DashboardFragment extends Fragment {
 
         config = new AppConfig(requireContext());
         db = AppDatabase.getInstance(requireContext());
+        updateManager = new UpdateManager(requireContext());
 
         bindViews(view);
         loadSettings();
@@ -87,6 +91,7 @@ public class DashboardFragment extends Fragment {
         txtStatus = root.findViewById(R.id.txtStatus);
         txtMaxAttemptsValue = root.findViewById(R.id.txtMaxAttemptsValue);
         txtDelayValue = root.findViewById(R.id.txtDelayValue);
+        txtUpdateStatus = root.findViewById(R.id.txtUpdateStatus);
     }
 
     private void loadSettings() {
@@ -133,6 +138,11 @@ public class DashboardFragment extends Fragment {
 
         MaterialButton btnBulkAdd = root.findViewById(R.id.btnBulkAdd);
         btnBulkAdd.setOnClickListener(v -> addBulkOrders());
+
+        MaterialButton btnCheckUpdate = root.findViewById(R.id.btnCheckUpdate);
+        if (btnCheckUpdate != null) {
+            btnCheckUpdate.setOnClickListener(v -> checkForUpdate());
+        }
 
         seekMaxAttempts.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -343,6 +353,79 @@ public class DashboardFragment extends Fragment {
         requireContext().startService(bubbleStop);
 
         txtStatus.setText("تم إيقاف الحملة بنجاح ⏹️");
+    }
+
+    /**
+     * فحص يدوي بس (مفيش شيك تلقائي في الخلفية ولا عند فتح التطبيق).
+     * لو فيه نسخة أحدث، بينزّلها ويفتح شاشة التثبيت أوتوماتيكي
+     * بعد ما التحميل يخلص — المستخدم برضو لازم يضغط "تثبيت" يدويًا،
+     * ده مطلب نظام أندرويد مفيش طريقة نتخطاه.
+     */
+    private void checkForUpdate() {
+        if (txtUpdateStatus != null) txtUpdateStatus.setText("جاري التحقق من التحديثات...");
+
+        updateManager.checkForUpdate(new UpdateManager.UpdateCallback() {
+            @Override
+            public void onUpdateAvailable(String versionName, String downloadUrl) {
+                if (txtUpdateStatus != null) {
+                    txtUpdateStatus.setText("فيه نسخة جديدة (" + versionName + ") - جاري التحميل...");
+                }
+                startDownload(versionName, downloadUrl);
+            }
+
+            @Override
+            public void onUpToDate() {
+                if (txtUpdateStatus != null) txtUpdateStatus.setText("التطبيق على آخر نسخة ✅");
+                Toast.makeText(requireContext(), "التطبيق على آخر نسخة بالفعل", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onError(String message) {
+                if (txtUpdateStatus != null) txtUpdateStatus.setText("تعذر التحقق من التحديثات");
+                Toast.makeText(requireContext(), "فشل التحقق: " + message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void startDownload(String versionName, String downloadUrl) {
+        if (!ensureInstallPermission()) return;
+
+        updateManager.downloadAndInstall(downloadUrl, versionName, new UpdateManager.DownloadCallback() {
+            @Override
+            public void onDownloadStarted() {
+                Toast.makeText(requireContext(), "بدأ تحميل التحديث في الخلفية", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onDownloadFailed(String message) {
+                if (txtUpdateStatus != null) txtUpdateStatus.setText("فشل تحميل التحديث");
+                Toast.makeText(requireContext(), "فشل التحميل: " + message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /**
+     * على أندرويد 8+ لازم المستخدم يفعّل "تثبيت من مصادر غير معروفة"
+     * للتطبيق ده تحديدًا قبل ما شاشة التثبيت تفتح، وإلا هتتقفل.
+     * لو مش مفعّل، بنوجهه لشاشة الإعدادات المخصصة للتطبيق.
+     */
+    private boolean ensureInstallPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+
+        boolean canInstall = requireContext().getPackageManager().canRequestPackageInstalls();
+        if (canInstall) return true;
+
+        Toast.makeText(requireContext(),
+                "من فضلك فعّل \"تثبيت من مصادر غير معروفة\" لهذا التطبيق أولًا",
+                Toast.LENGTH_LONG).show();
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + requireContext().getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
     }
 
     @Override

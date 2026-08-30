@@ -306,6 +306,18 @@ public class DashboardFragment extends Fragment {
             return;
         }
 
+        // بدون Default Dialer، النظام مش بيبعت أي أحداث لـ OrderInCallService
+        // (onCallEnded وغيرها)، وده يعني إن الحملة هتتصل بأول رقم بس
+        // وتقف من غير أي رسالة خطأ (مفيش redial ولا انتقال للرقم اللي بعده).
+        // لازم نمنع البدء ونوجّه المستخدم لتفعيل الإعداد ده الأول.
+        if (!isDefaultDialerApp()) {
+            Toast.makeText(requireContext(),
+                    "لازم تفعّل LocalOrderAI كـ Default Phone App الأول، وإلا الاتصال المتكرر مش هيشتغل بعد ما المكالمة تخلص.",
+                    Toast.LENGTH_LONG).show();
+            promptSetDefaultDialer();
+            return;
+        }
+
         // بنبدأ الأوفر الأول قبل خدمة الحملة، عشان المستقبِل بتاعه
         // يبقى مسجل قبل ما أي broadcast يتبعت. وحتى لو حصل تأخير،
         // الأوفر بيقرا آخر حالة محفوظة من AppConfig فورًا برضو.

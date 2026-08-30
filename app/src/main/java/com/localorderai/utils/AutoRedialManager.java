@@ -41,8 +41,8 @@ public class AutoRedialManager {
 
     private final Context context;
     private final String phoneNumber;
-    private final int maxAttempts;
-    private final int delaySeconds;
+    private volatile int maxAttempts;
+    private volatile int delaySeconds;
     private int currentAttempt = 0;
     private boolean isRunning = false;
     private boolean finishedNotified = false;
@@ -60,6 +60,24 @@ public class AutoRedialManager {
 
     public void setListener(RedialListener listener) {
         this.listener = listener;
+    }
+
+    /**
+     * بيسمح بتحديث أقصى عدد محاولات وقت التشغيل (لما المستخدم يغيّر
+     * السلايدر في الـ overlay panel وقت ما فيه رقم شغال دلوقتي)،
+     * عشان التغيير يأثر على الرقم الحالي فورًا مش بس الأرقام الجاية.
+     */
+    public void updateMaxAttempts(int newMaxAttempts) {
+        this.maxAttempts = Math.max(1, newMaxAttempts);
+    }
+
+    /** نفس الفكرة بالنسبة للتأخير بين المحاولات. */
+    public void updateDelaySeconds(int newDelaySeconds) {
+        this.delaySeconds = Math.max(0, newDelaySeconds);
+    }
+
+    public int getMaxAttempts() {
+        return maxAttempts;
     }
 
     public void start() {

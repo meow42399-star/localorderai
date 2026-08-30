@@ -68,6 +68,22 @@ public class CampaignForegroundService extends Service {
         }
     };
 
+    // بيستقبل تغييرات أقصى عدد محاولات / التأخير من الـ overlay panel
+    // وقت ما فيه رقم شغال دلوقتي، وبيحدّث الـ AutoRedialManager الحالي
+    // فورًا بدل ما التغيير يأثر بس على الأرقام الجاية.
+    private final BroadcastReceiver liveSettingsReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (currentRedial == null) return;
+            if (intent.hasExtra(OverlayBubbleService.EXTRA_MAX_ATTEMPTS)) {
+                currentRedial.updateMaxAttempts(intent.getIntExtra(OverlayBubbleService.EXTRA_MAX_ATTEMPTS, currentRedial.getMaxAttempts()));
+            }
+            if (intent.hasExtra(OverlayBubbleService.EXTRA_DELAY_SECONDS)) {
+                currentRedial.updateDelaySeconds(intent.getIntExtra(OverlayBubbleService.EXTRA_DELAY_SECONDS, config.getDelaySeconds()));
+            }
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -78,6 +94,9 @@ public class CampaignForegroundService extends Service {
 
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 stopReceiver, new IntentFilter(com.localorderai.ui.CampaignProgressDialog.ACTION_STOP)
+        );
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                liveSettingsReceiver, new IntentFilter(OverlayBubbleService.ACTION_LIVE_SETTINGS_CHANGED)
         );
     }
 
@@ -207,6 +226,11 @@ public class CampaignForegroundService extends Service {
             currentRedial = redial;
 
             redial.setListener(new AutoRedialManager.RedialListener() {
+                // بيتسجل true لو الرقم اتوقف يدويًا (skip أو stop) قبل
+                // ما يخلص محاولاته أو يتوصل، عشان onFinished() يعرف
+                // يحدد الحالة النهائية صح بدل ما يسيبها PENDING للأبد.
+                boolean wasManuallyStopped = false;
+
                 @Override
                 public void onAttemptStarted(int attemptNumber, int maxAttempts) {
                     Log.d(TAG, "Auto-dial attempt " + attemptNumber + "/" + maxAttempts);
@@ -226,13 +250,28 @@ public class CampaignForegroundService extends Service {
                 @Override
                 public void onStopped() {
                     Log.d(TAG, "Auto-dialing stopped for: " + record.customerName);
+                    // بيتنادى لما skipCurrent() أو stopCampaign() توقف الرقم
+                    // ده يدويًا قبل ما يخلص محاولاته أو يتوصل. من غير العلم
+                    // ده، onFinished(false) هيسيب الحالة PENDING زي ما هي،
+                    // وده يخلي الرقم يتصل عليه تاني من الصفر في كل حملة
+                    // جاية حتى لو المستخدم قصد يتخطاه.
+                    wasManuallyStopped = true;
                 }
 
                 @Override
                 public void onFinished(boolean wasAnswered) {
-                    // الرقم ده خلص تمامًا (اتوصل أو خلص محاولاته) —
-                    // نحدث حالته النهائية وننتقل للرقم اللي بعده.
-                    safeUpdateRecord(record, wasAnswered ? OrderRecord.STATUS_CALLED : record.status);
+                    // الرقم ده خلص تمامًا (اتوصل أو خلص محاولاته أو
+                    // اتوقف يدويًا) — نحدث حالته النهائية وننتقل للرقم
+                    // اللي بعده.
+                    String finalStatus;
+                    if (wasAnswered) {
+                        finalStatus = OrderRecord.STATUS_CALLED;
+                    } else if (wasManuallyStopped) {
+                        finalStatus = OrderRecord.STATUS_FAILED;
+                    } else {
+                        finalStatus = record.status;
+                    }
+                    safeUpdateRecord(record, finalStatus);
 
                     int processed = 0;
                     try {
@@ -364,5 +403,6 @@ public class CampaignForegroundService extends Service {
         currentRedial = null;
         executor.shutdownNow();
         try { LocalBroadcastManager.getInstance(this).unregisterReceiver(stopReceiver); } catch (Exception ignored) {}
+        try { LocalBroadcastManager.getInstance(this).unregisterReceiver(liveSettingsReceiver); } catch (Exception ignored) {}
     }
 }

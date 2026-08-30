@@ -60,19 +60,33 @@ public class LogsFragment extends Fragment {
     }
 
     private void exportCsv() {
+        // بنستخدم Application context جوه الـ background thread عشان
+        // نتفادى requireContext()/requireActivity() لو المستخدم قفل
+        // الشاشة أو غيّر التاب وقت ما التصدير لسه شغال (بيرمي
+        // IllegalStateException ويكسر التطبيق). التحديث النهائي للـ UI
+        // (المشاركة / رسالة الخطأ) بيتأكد إن الـ Fragment لسه متصل قبل
+        // ما يلمس أي View.
+        final android.content.Context appContext = requireContext().getApplicationContext();
+
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 String fileName = "orders_report_" +
                         new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
                                 .format(new java.util.Date()) + ".csv";
 
-                File file = CsvExporter.exportToCsv(requireContext(), db.orderRecordDao().getAllRecordsSync(), fileName);
+                File file = CsvExporter.exportToCsv(appContext, db.orderRecordDao().getAllRecordsSync(), fileName);
 
-                requireActivity().runOnUiThread(() -> CsvExporter.shareCsv(requireContext(), file));
+                if (getActivity() == null) return;
+                requireActivity().runOnUiThread(() -> {
+                    if (getActivity() == null) return;
+                    CsvExporter.shareCsv(requireContext(), file);
+                });
             } catch (Exception e) {
                 if (getActivity() == null) return;
-                requireActivity().runOnUiThread(() ->
-                        Toast.makeText(requireContext(), "فشل التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                requireActivity().runOnUiThread(() -> {
+                    if (getActivity() == null) return;
+                    Toast.makeText(requireContext(), "فشل التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
             }
         });
     }

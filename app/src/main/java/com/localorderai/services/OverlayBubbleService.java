@@ -1,5 +1,10 @@
 package com.localorderai.services;
 
+// ACTION_LIVE_SETTINGS_CHANGED: بيتبعت لما المستخدم يغيّر أقصى عدد
+// محاولات أو التأخير من الـ overlay panel وقت ما الحملة شغالة، عشان
+// CampaignForegroundService يقدر يحدّث الـ AutoRedialManager الشغال
+// حاليًا فورًا، مش بس الأرقام الجاية.
+
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -41,6 +46,17 @@ import com.localorderai.ui.CampaignProgressDialog;
 public class OverlayBubbleService extends Service {
 
     private static final String TAG = "OverlayBubbleService";
+
+    public static final String ACTION_LIVE_SETTINGS_CHANGED = "com.localorderai.LIVE_SETTINGS_CHANGED";
+    public static final String EXTRA_MAX_ATTEMPTS = "extra_max_attempts";
+    public static final String EXTRA_DELAY_SECONDS = "extra_delay_seconds";
+
+    private void broadcastLiveSettingsChanged(Integer maxAttempts, Integer delaySeconds) {
+        Intent b = new Intent(ACTION_LIVE_SETTINGS_CHANGED);
+        if (maxAttempts != null) b.putExtra(EXTRA_MAX_ATTEMPTS, (int) maxAttempts);
+        if (delaySeconds != null) b.putExtra(EXTRA_DELAY_SECONDS, (int) delaySeconds);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(b);
+    }
 
     private WindowManager windowManager;
     private AppConfig config;
@@ -351,6 +367,7 @@ public class OverlayBubbleService extends Service {
                     int clamped = Math.max(1, Math.min(progress, 100));
                     config.setMaxAttempts(clamped);
                     updateAttemptsLabel(clamped);
+                    broadcastLiveSettingsChanged(clamped, null);
                 }
                 @Override public void onStartTrackingTouch(SeekBar seekBar) {}
                 @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -373,6 +390,7 @@ public class OverlayBubbleService extends Service {
                     int clamped = Math.max(1, Math.min(progress, 999));
                     config.setDelaySeconds(clamped);
                     updateDelayLabel(clamped);
+                    broadcastLiveSettingsChanged(null, clamped);
                 }
                 @Override public void onStartTrackingTouch(SeekBar seekBar) {}
                 @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -396,6 +414,7 @@ public class OverlayBubbleService extends Service {
         config.setMaxAttempts(newVal);
         if (seekOverlayAttempts != null) seekOverlayAttempts.setProgress(newVal);
         updateAttemptsLabel(newVal);
+        broadcastLiveSettingsChanged(newVal, null);
     }
 
     private void changeDelay(int delta) {
@@ -403,6 +422,7 @@ public class OverlayBubbleService extends Service {
         config.setDelaySeconds(newVal);
         if (seekOverlayDelay != null) seekOverlayDelay.setProgress(newVal);
         updateDelayLabel(newVal);
+        broadcastLiveSettingsChanged(null, newVal);
     }
 
     private void updateAttemptsLabel(int attempts) {

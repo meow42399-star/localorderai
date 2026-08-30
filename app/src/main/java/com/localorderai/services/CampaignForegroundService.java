@@ -61,6 +61,15 @@ public class CampaignForegroundService extends Service {
 
     private AutoRedialManager currentRedial;
 
+    // FIX: TelephonyManager بيتابع حالة المكالمة (رنّت/اترّدت/خلصت) من
+    // غير ما يحتاج التطبيق يبقى Default Dialer — عكس OrderInCallService
+    // اللي محتاج الدور ده صراحة عشان يشتغل. ده بقى المصدر الأساسي
+    // اللي بيشغّل الـ redial؛ OrderInCallService بيفضل شغال كمان لو
+    // حد فعّل Default Dialer فعلاً (الاتنين آمنين مع بعض، AutoRedialManager
+    // بيتجاهل أي نداء إضافي بعد أول onFinished).
+    private TelephonyCallStateListener telephonyListener;
+    private boolean telephonyWasAnswered = false;
+
     private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -98,6 +107,31 @@ public class CampaignForegroundService extends Service {
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 liveSettingsReceiver, new IntentFilter(OverlayBubbleService.ACTION_LIVE_SETTINGS_CHANGED)
         );
+
+        telephonyListener = new TelephonyCallStateListener(this);
+        telephonyListener.setCallback(new TelephonyCallStateListener.Callback() {
+            @Override
+            public void onCallRinging() {
+                // مفيش حاجة نعملها هنا دلوقتي — بس مفيدة لو حبينا نعرض
+                // حالة "بيرن" في الـ overlay مستقبلاً.
+            }
+
+            @Override
+            public void onCallAnswered() {
+                telephonyWasAnswered = true;
+            }
+
+            @Override
+            public void onCallEnded(boolean wasAnswered) {
+                // wasAnswered هنا جاي من TelephonyManager مباشرة (CALL_STATE_OFFHOOK
+                // حصل قبل الـ IDLE)، مش من InCallService. ده اللي بيخلي الحملة
+                // تكمل وتعيد الاتصال من غير ما تحتاج Default Dialer.
+                if (currentRedial != null) {
+                    currentRedial.scheduleNextAttemptIfNeeded(wasAnswered || telephonyWasAnswered);
+                }
+                telephonyWasAnswered = false;
+            }
+        });
     }
 
     @Override
@@ -132,6 +166,10 @@ public class CampaignForegroundService extends Service {
         if (isCampaignRunning) return;
         isCampaignRunning = true;
         config.setCampaignRunning(true);
+
+        if (telephonyListener != null) {
+            telephonyListener.start();
+        }
 
         executor.execute(() -> {
             try {
@@ -171,6 +209,7 @@ public class CampaignForegroundService extends Service {
             mainHandler.post(() -> updateNotification("انتهت الحملة"));
             isCampaignRunning = false;
             config.setCampaignRunning(false);
+            if (telephonyListener != null) telephonyListener.stop();
             return;
         }
 
@@ -188,6 +227,7 @@ public class CampaignForegroundService extends Service {
             currentRedial.stop();
             currentRedial = null;
         }
+        if (telephonyListener != null) telephonyListener.stop();
         updateNotification("تم إيقاف الحملة");
         stopForeground(true);
         stopSelf();
@@ -401,6 +441,7 @@ public class CampaignForegroundService extends Service {
         super.onDestroy();
         isCampaignRunning = false;
         currentRedial = null;
+        if (telephonyListener != null) telephonyListener.stop();
         executor.shutdownNow();
         try { LocalBroadcastManager.getInstance(this).unregisterReceiver(stopReceiver); } catch (Exception ignored) {}
         try { LocalBroadcastManager.getInstance(this).unregisterReceiver(liveSettingsReceiver); } catch (Exception ignored) {}

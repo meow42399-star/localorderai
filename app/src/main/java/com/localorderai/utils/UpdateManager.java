@@ -207,7 +207,8 @@ public class UpdateManager {
      */
     public void downloadAndInstall(String downloadUrl, String versionName, DownloadCallback callback) {
         try {
-            File apkFile = new File(appContext.getExternalFilesDir(null), "update-" + versionName + ".apk");
+            String fileName = "update-" + versionName + ".apk";
+            File apkFile = new File(appContext.getExternalFilesDir(null), fileName);
             if (apkFile.exists()) {
                 //noinspection ResultOfMethodCallIgnored
                 apkFile.delete();
@@ -225,12 +226,19 @@ public class UpdateManager {
                     .setTitle("تحديث LocalOrderAI")
                     .setDescription("جاري تحميل النسخة " + versionName)
                     .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationUri(Uri.fromFile(apkFile))
+                    // setDestinationInExternalFilesDir بدل setDestinationUri(Uri.fromFile(...)):
+                    // دي الطريقة الرسمية اللي DownloadManager (خدمة نظام منفصلة عن
+                    // عملية التطبيق) عنده صلاحية كتابة مضمونة فيها على أندرويد 10+
+                    // (scoped storage). استخدام Uri.fromFile() مباشرة على مسار
+                    // getExternalFilesDir كان بيفشل بصمت من غير أي استثناء أو
+                    // إشعار على بعض الأجهزة (خصوصًا Samsung/One UI).
+                    .setDestinationInExternalFilesDir(appContext, null, fileName)
                     .setAllowedOverMetered(true)
                     .setAllowedOverRoaming(true);
 
             long downloadId = downloadManager.enqueue(request);
-            registerDownloadReceiver(downloadId, apkFile);
+            Log.d(TAG, "Download enqueued, id=" + downloadId + " dest=" + apkFile);
+            registerDownloadReceiver(downloadId, apkFile, callback);
             callback.onDownloadStarted();
 
         } catch (Exception e) {
@@ -239,7 +247,7 @@ public class UpdateManager {
         }
     }
 
-    private void registerDownloadReceiver(long expectedDownloadId, File apkFile) {
+    private void registerDownloadReceiver(long expectedDownloadId, File apkFile, DownloadCallback callback) {
         if (downloadCompleteReceiver != null) {
             try {
                 appContext.unregisterReceiver(downloadCompleteReceiver);
@@ -257,8 +265,33 @@ public class UpdateManager {
                 } catch (Exception ignored) {}
                 downloadCompleteReceiver = null;
 
+                // بنسأل DownloadManager نفسه عن حالة التحميل الفعلية بدل ما
+                // نفترض النجاح لمجرد وصول الـ broadcast — التحميل ممكن يخلص
+                // بحالة FAILED (مساحة ناقصة، خطأ شبكة، إلخ) والـ broadcast
+                // برضو بيتبعت في الحالتين.
+                DownloadManager downloadManager =
+                        (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+                if (downloadManager != null) {
+                    android.database.Cursor cursor = downloadManager.query(
+                            new DownloadManager.Query().setFilterById(expectedDownloadId));
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+                        int reasonIdx = cursor.getColumnIndex(DownloadManager.COLUMN_REASON);
+                        int status = statusIdx >= 0 ? cursor.getInt(statusIdx) : -1;
+                        int reason = reasonIdx >= 0 ? cursor.getInt(reasonIdx) : -1;
+                        cursor.close();
+
+                        if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                            Log.e(TAG, "Download failed, status=" + status + " reason=" + reason);
+                            callback.onDownloadFailed("فشل التحميل (status=" + status + ", reason=" + reason + ")");
+                            return;
+                        }
+                    }
+                }
+
                 if (!apkFile.exists()) {
                     Log.e(TAG, "Download reported complete but file not found: " + apkFile);
+                    callback.onDownloadFailed("التحميل خلص لكن الملف مش موجود");
                     return;
                 }
 
@@ -295,6 +328,13 @@ public class UpdateManager {
             context.startActivity(installIntent);
         } catch (Exception e) {
             Log.e(TAG, "promptInstall failed", e);
+            // مكناش بنعمل حاجة هنا قبل كده، فلو فتح شاشة التثبيت فشل
+            // (مسار FileProvider غلط، أو مفيش تطبيق يقدر يفتح النوع ده)
+            // المستخدم مكانش بياخد أي تنبيه خالص والتحميل كان بيبان
+            // "واقف" من غير تفسير.
+            mainHandler.post(() -> android.widget.Toast.makeText(appContext,
+                    "التحميل خلص لكن فشل فتح شاٍشة التثبيت: " + e.getMessage(),
+                    android.widget.Toast.LENGTH_LONG).show());
         }
     }
 }

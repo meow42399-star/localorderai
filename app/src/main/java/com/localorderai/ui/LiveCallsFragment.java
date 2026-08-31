@@ -23,7 +23,6 @@ import com.localorderai.R;
 import com.localorderai.data.AppConfig;
 import com.localorderai.data.AppDatabase;
 import com.localorderai.services.CampaignForegroundService;
-import com.localorderai.services.OrderInCallService;
 import com.localorderai.services.OverlayBubbleService;
 
 /**
@@ -182,14 +181,14 @@ public class LiveCallsFragment extends Fragment {
         boolean newMuted = !config.isMicMuted();
         config.setMicMuted(newMuted);
         refreshMicButtonState();
-        OrderInCallService.applyAudioSettingsLive();
+        com.localorderai.services.TelephonyCallStateListener.applyAudioSettingsLive();
     }
 
     private void toggleSpeaker() {
         boolean newVal = !config.isSpeakerEnabled();
         config.setSpeakerEnabled(newVal);
         refreshSpeakerButtonState();
-        OrderInCallService.applyAudioSettingsLive();
+        com.localorderai.services.TelephonyCallStateListener.applyAudioSettingsLive();
     }
 
     private void refreshMicButtonState() {

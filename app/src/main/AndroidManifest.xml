@@ -55,26 +55,6 @@
             android:name=".services.OverlayBubbleService"
             android:exported="false" />
 
-        <!--
-            OrderInCallService اختيارية بالكامل: التطبيق مبقاش محتاج
-            Default Dialer خالص عشان الاتصال أو إعادة الاتصال (redial)
-            يشتغلوا — دول بيعتمدوا على TelephonyCallStateListener
-            (TelephonyManager) اللي بيشتغل من غير أي دور خاص. الخدمة
-            دي بتفضل موجودة بس لو حد فعّل Default Dialer يدويًا بنفسه
-            من إعدادات النظام (اختياري تمامًا، مش مطلوب من التطبيق).
-        -->
-        <service
-            android:name=".services.OrderInCallService"
-            android:permission="android.permission.BIND_INCALL_SERVICE"
-            android:exported="true">
-            <meta-data
-                android:name="android.telecom.IN_CALL_SERVICE_UI"
-                android:value="true" />
-            <intent-filter>
-                <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-        </service>
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.localorderai.fileprovider"

@@ -300,29 +300,29 @@ public class DashboardFragment extends Fragment {
             return;
         }
 
+        // FIX: بما إن التطبيق مبقاش محتاج Default Dialer خالص، متابعة
+        // حالة المكالمة (رنّت/اترّدت/خلصت) وتشغيل الـ redial بيعتمدوا
+        // بالكامل على READ_PHONE_STATE عن طريق TelephonyCallStateListener.
+        // من غير الإذن ده، الحملة كانت بتبدأ عادي بس المكالمة ميرنش
+        // تاني ومعلومات البابل ميتحدثش، من غير أي رسالة توضح السبب.
+        // دلوقتي بنفحصه صراحة قبل البدء.
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(requireContext(), "يجب منح إذن \"حالة الهاتف\" (Phone State) حتى تعمل إعادة الاتصال التلقائي بعد انتهاء كل مكالمة.", Toast.LENGTH_LONG).show();
+            requestNecessaryPermissions();
+            return;
+        }
+
         if (!hasOverlayPermission()) {
             Toast.makeText(requireContext(), "من فضلك فعّل إذن \"الظهور فوق التطبيقات الأخرى\" أولًا", Toast.LENGTH_LONG).show();
             requestOverlayPermission();
             return;
         }
 
-        // ملحوظة: مش لازم LocalOrderAI يبقى Default Phone App عشان
-        // الاتصال المتكرر (redial) يشتغل. الحملة بتتابع حالة المكالمة
-        // عن طريق TelephonyManager مباشرة (TelephonyCallStateListener)،
-        // اللي بيحتاج بس READ_PHONE_STATE (ممنوح أصلًا)، ومبيحتاجش
-        // دور Default Dialer خالص. لو حد فعّل Default Dialer برضه هيشتغل
-        // عادي جنبها من غير تعارض.
-
-        // بنبدأ الأوفر الأول قبل خدمة الحملة، عشان المستقبِل بتاعه
-        // يبقى مسجل قبل ما أي broadcast يتبعت. وحتى لو حصل تأخير،
-        // الأوفر بيقرا آخر حالة محفوظة من AppConfig فورًا برضو.
-        try {
-            Intent bubbleIntent = new Intent(requireContext(), OverlayBubbleService.class);
-            requireContext().startService(bubbleIntent);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
+        // FIX: OverlayBubbleService بقت بتتفتح من جوه CampaignForegroundService
+        // نفسها (مش من هنا)، عشان نضمن ترتيب صحيح: الأوفر تتأسس وتسجل
+        // الـ receiver بتاعها قبل ما أي broadcast يتبعت. ده حل مشكلة
+        // ظهور البابل فاضية ("-") في بعض الأجهزة (خصوصًا Samsung/One UI
+        // اللي بيأخر بدء الخدمات في الخلفية).
         Intent serviceIntent = new Intent(requireContext(), CampaignForegroundService.class);
         try {
             ContextCompat.startForegroundService(requireContext(), serviceIntent);
@@ -444,7 +444,6 @@ public class DashboardFragment extends Fragment {
         View dotCall = root.findViewById(R.id.dotCall);
         View dotRecord = root.findViewById(R.id.dotRecord);
         View dotNotif = root.findViewById(R.id.dotNotif);
-        View dotDialer = root.findViewById(R.id.dotDialer);
 
         boolean callOk = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
         boolean recOk = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
@@ -456,15 +455,6 @@ public class DashboardFragment extends Fragment {
         if (dotCall != null) dotCall.setBackgroundResource(callOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotRecord != null) dotRecord.setBackgroundResource(recOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotNotif != null) dotNotif.setBackgroundResource(notifOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
-
-        // FIX: التطبيق بقى بيتصل عن طريق دايلر الموبايل العادي (ACTION_CALL)
-        // ويتابع حالة المكالمة عن طريق TelephonyManager — مبقاش محتاج
-        // ولا مؤهل يبقى Default Phone App خالص (شلنا الـ intent-filter
-        // بتاع ACTION_DIAL من المانيفست). فمؤشر/زرار "Default Dialer"
-        // مبقاش له معنى وبيخفى تمامًا بدل ما يوهم المستخدم إنه مطلوب.
-        if (dotDialer != null) dotDialer.setVisibility(View.GONE);
-        View tvDialer = root.findViewById(R.id.tvDialerPermission);
-        if (tvDialer != null) tvDialer.setVisibility(View.GONE);
     }
 
     private void validatePhone() {

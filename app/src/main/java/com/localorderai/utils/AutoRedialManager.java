@@ -164,17 +164,14 @@ public class AutoRedialManager {
             return;
         }
 
-        // تحذير مسبق لو إذن الفقاعة العائمة (اللي بيسمح ببدء الأنشطة من الخلفية) مش ممنوح.
-        // ملحوظة: الإذن الممنوح لوحده مش كافي — أندرويد بيدّي استثناء بدء
-        // الأنشطة من الخلفية بس لو فيه overlay view مرسومة فعليًا على
-        // الشاشة دلوقتي، مش لمجرد إن الإذن مفعّل. لو الأوفر اتقفلت أو
-        // فشلت (زي ما بيحصل على بعض أجهزة Samsung)، startActivity() جوّه
-        // هترفض بصمت تام من النظام من غير أي استثناء. حماية إضافية موجودة
-        // في CampaignForegroundService (بيوقف الحملة فورًا لو الأوفر فشلت
-        // ترسم نفسها من الأساس)، لكن الفحص هنا بيغطي حالة إن الأوفر
-        // اتقفلت لاحقًا (مثلاً المستخدم لغى الإذن يدويًا وسط الحملة).
+        // FIX: بعد ما التطبيق بقى Default Dialer، أندرويد بيدّي استثناء
+        // رسمي لبدء الأنشطة من الخلفية للـ Default Dialer نفسه — مش
+        // محتاجين نعتمد على وجود overlay view مرسومة فعليًا زي الأول.
+        // بنسيب فحص SYSTEM_ALERT_WINDOW كتحذير احتياطي بس (مش حرج)،
+        // لأنه لسه مطلوب لعرض الأوفر بابل نفسها (اللي بتوري تقدم الحملة)،
+        // مش لبدء المكالمة.
         if (!hasOverlayPermission()) {
-            AppLogger.w(TAG, "SYSTEM_ALERT_WINDOW not granted — call launch from background will likely be silently blocked");
+            AppLogger.w(TAG, "SYSTEM_ALERT_WINDOW not granted — overlay bubble progress UI will not show, but call launch should still work via Default Dialer role");
         }
 
         currentAttempt++;

@@ -53,6 +53,8 @@ public class DashboardFragment extends Fragment {
     private MaterialButtonToggleGroup toggleSimSlot;
     private TextView txtStatus, txtMaxAttemptsValue, txtDelayValue;
     private TextView txtUpdateStatus;
+    private TextView txtDefaultDialerStatus;
+    private MaterialButton btnSetDefaultDialer;
 
     private AppConfig config;
     private AppDatabase db;
@@ -94,6 +96,11 @@ public class DashboardFragment extends Fragment {
         txtMaxAttemptsValue = root.findViewById(R.id.txtMaxAttemptsValue);
         txtDelayValue = root.findViewById(R.id.txtDelayValue);
         txtUpdateStatus = root.findViewById(R.id.txtUpdateStatus);
+        txtDefaultDialerStatus = root.findViewById(R.id.txtDefaultDialerStatus);
+        btnSetDefaultDialer = root.findViewById(R.id.btnSetDefaultDialer);
+        if (btnSetDefaultDialer != null) {
+            btnSetDefaultDialer.setOnClickListener(v -> promptSetDefaultDialer());
+        }
     }
 
     private void loadSettings() {
@@ -344,6 +351,19 @@ public class DashboardFragment extends Fragment {
             return;
         }
 
+        // FIX: التطبيق دلوقتي بيطلب دور Default Dialer (RoleManager.ROLE_DIALER)
+        // عشان بدء المكالمات من الخلفية والتحكم في السماعة يشتغلوا بثبات
+        // (النظام بيرفضهم بصمت لغير Default Dialer على أندرويد الحديث).
+        // لو الدور مش متاح، بنحذّر المستخدم وبنوجهه لتفعيله، لكن مش بنمنع
+        // بدء الحملة بشكل صارم — الاتصال الأساسي (ACTION_CALL) هيفضل شغال
+        // حتى من غير الدور، والفشل الوحيد المحتمل هيكون في السماعة أو
+        // redial بعد المكالمة الأولى، مش تعطيل كامل.
+        if (!isDefaultDialerApp()) {
+            Toast.makeText(requireContext(),
+                    "التطبيق مش مسجّل كتطبيق اتصال افتراضي — قد لا يعمل مكبر الصوت أو تكرار الاتصال بشكل موثوق. اضغط \"تفعيل\" في الأعلى أولًا.",
+                    Toast.LENGTH_LONG).show();
+        }
+
         // FIX: OverlayBubbleService بقت بتتفتح من جوه CampaignForegroundService
         // نفسها (مش من هنا)، عشان نضمن ترتيب صحيح: الأوفر تتأسس وتسجل
         // الـ receiver بتاعها قبل ما أي broadcast يتبعت. ده حل مشكلة
@@ -373,6 +393,59 @@ public class DashboardFragment extends Fragment {
             startActivity(intent);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * بيتحقق إن التطبيق فعلاً مسجّل كـ Default Dialer عند النظام.
+     * على أندرويد < 6 (Marshmallow)، مفهوم "Default Dialer" غير موجود
+     * أصلاً — النظام مكانش يقيّد بدء الأنشطة من الخلفية زي دلوقتي،
+     * فبنرجع true (يعني "مفيش حاجة تمنعنا") بدل ما نضلل المستخدم
+     * بتحذير غير منطقي على جهازه.
+     */
+    private boolean isDefaultDialerApp() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        try {
+            android.telecom.TelecomManager telecomManager =
+                    (android.telecom.TelecomManager) requireContext().getSystemService(android.content.Context.TELECOM_SERVICE);
+            if (telecomManager == null) return false;
+            String defaultDialerPackage = telecomManager.getDefaultDialerPackage();
+            return requireContext().getPackageName().equals(defaultDialerPackage);
+        } catch (Exception e) {
+            // فحص فاشل مايعنيش نمنع المستخدم من الاستخدام — بنعتبره
+            // "مش مفعّل" (أسوأ افتراض ممكن) بدل ما نرمي استثناء يوقف
+            // الشاشة كلها.
+            AppLogger.e("DashboardFragment", "isDefaultDialerApp check failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * بيفتح شاشة النظام الرسمية لطلب دور Default Dialer. على أندرويد
+     * 10+ بيستخدم RoleManager (الطريقة الحديثة الموصى بها من Google)،
+     * وعلى الإصدارات الأقدم بيرجع لـ ACTION_CHANGE_DEFAULT_DIALER القديمة.
+     * أي فشل هنا بيتمسك ويتسجل — رفض المستخدم للدور مش خطأ، لكن فشل
+     * فتح الشاشة نفسها (جهاز مش داعم، مثلاً) لازم يوصلنا في اللوج.
+     */
+    private void promptSetDefaultDialer() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.app.role.RoleManager roleManager =
+                        (android.app.role.RoleManager) requireContext().getSystemService(android.content.Context.ROLE_SERVICE);
+                if (roleManager != null && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)) {
+                    Intent intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER);
+                    startActivity(intent);
+                    return;
+                }
+            }
+            // Fallback للإصدارات الأقدم من Android 10
+            Intent intent = new Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER);
+            intent.putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
+                    requireContext().getPackageName());
+            startActivity(intent);
+        } catch (Exception e) {
+            AppLogger.e("DashboardFragment", "promptSetDefaultDialer failed", e);
+            Toast.makeText(requireContext(), "تعذّر فتح شاشة تفعيل تطبيق الاتصال الافتراضي", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -512,6 +585,25 @@ public class DashboardFragment extends Fragment {
         if (dotCall != null) dotCall.setBackgroundResource(callOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotRecord != null) dotRecord.setBackgroundResource(recOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotNotif != null) dotNotif.setBackgroundResource(notifOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
+
+        updateDefaultDialerStatusUi();
+    }
+
+    /**
+     * بتتحدث في onResume() عشان تعكس الحالة الفعلية بعد ما المستخدم
+     * يرجع من شاشة اختيار Default Dialer (سواء وافق أو رفض).
+     */
+    private void updateDefaultDialerStatusUi() {
+        boolean isDefault = isDefaultDialerApp();
+        if (txtDefaultDialerStatus != null) {
+            txtDefaultDialerStatus.setText(isDefault
+                    ? "مفعّل ✅"
+                    : "مطلوب للسماعة وتكرار الاتصال");
+        }
+        if (btnSetDefaultDialer != null) {
+            btnSetDefaultDialer.setText(isDefault ? "مفعّل" : "تفعيل");
+            btnSetDefaultDialer.setEnabled(!isDefault);
+        }
     }
 
     private void validatePhone() {

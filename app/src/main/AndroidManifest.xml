@@ -6,9 +6,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -47,20 +49,28 @@
             android:noHistory="true" />
 
         <!--
-            foregroundServiceType="dataSync" هنا مش دقيق دلاليًا (الخدمة
-            فعليًا بتدير حملة اتصال، مش مزامنة بيانات)، لكنه النوع الوحيد
-            اللي بيشتغل بمجرد FOREGROUND_SERVICE العادي. أي نوع أدق زي
-            "phoneCall" بيتطلب من أندرويد 14 (targetSdk 34+) واحد من:
-            MANAGE_OWN_CALLS permission، أو التطبيق يكون System Dialer
-            فعليًا. المشروع ده شال فكرة Default Dialer بالكامل (بيستخدم
-            TelephonyManager + ACTION_CALL بس)، فمفيش شرط بيستوفيه لأي
-            نوع أدق — استخدام phoneCall هنا كان يسبب SecurityException
-            فوري ويقفل الحملة قبل ما تبدأ.
+            دلوقتي المشروع فعليًا بيطلب دور Default Dialer (RoleManager.ROLE_DIALER)
+            عشان يقدر يبدأ أنشطة من الخلفية (بدل استغلال SYSTEM_ALERT_WINDOW اللي كان
+            بيفشل صامت لو الأوفر مش ظاهرة) ويتحكم في السماعة بشكل موثوق (setSpeakerphoneOn
+            بيتجاهله النظام غالبًا لغير Default Dialer). المنطق الفعلي لمتابعة حالة
+            المكالمة (رن/رد/انتهاء) لسه عن طريق TelephonyManager.listen() زي الأول —
+            نفس الطريقة اللي تطبيقات auto-dialer تجارية بتستخدمها فعليًا، مش InCallService
+            نفسها. InCallServiceImpl هنا مجرد Service فاضية تقريبًا، دورها الوحيد إنها
+            تسجّل عند النظام إن التطبيق فعلاً بيقدر يبقى Default Dialer.
         -->
         <service
             android:name=".services.CampaignForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="phoneCall" />
+
+        <service
+            android:name=".services.InCallServiceImpl"
+            android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".services.OverlayBubbleService"

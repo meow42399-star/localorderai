@@ -442,29 +442,20 @@ public class OverlayBubbleService extends Service {
     private void updateFromIntent(Intent intent) {
         lastTotal = intent.getIntExtra(CampaignProgressDialog.EXTRA_TOTAL, lastTotal);
         lastProcessed = intent.getIntExtra(CampaignProgressDialog.EXTRA_PROCESSED, lastProcessed);
+
+        // FIX: كل broadcast دلوقتي بيحمل بيانات العميل الحالي كاملة
+        // (اسم + رقم + محاولات + أقصى محاولات) من CampaignForegroundService،
+        // فمبقاش محتاجين نخمّن "هل ده عميل جديد؟" ونصفّر حقول يدويًا —
+        // ده بالظبط اللي كان بيسبب ظهور "-" في مكان الرقم وعداد
+        // المحاولات مش بيتحدث صح. دلوقتي بس بناخد القيم زي ما هي.
         String current = intent.getStringExtra(CampaignProgressDialog.EXTRA_CURRENT_NAME);
         String currentPhone = intent.getStringExtra(CampaignProgressDialog.EXTRA_LAST_PHONE);
-        int attempts = intent.getIntExtra(CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS, lastAutoDialAttempts);
-        int maxAttempts = intent.getIntExtra(CampaignProgressDialog.EXTRA_AUTODIAL_MAX, lastAutoDialMax);
-
-        // broadcastCurrentName() بيبعت اسم بس من غير أي إكسترا تانية،
-        // وده بالظبط لحظة بداية عميل جديد في الطابور — فبنصفر عداد
-        // المحاولات القديم في اللحظة دي تحديدًا بدل ما يفضل عارض آخر
-        // رقم محاولة كان للعميل اللي فات.
-        boolean isNewClientStart = current != null && currentPhone == null
-                && !intent.hasExtra(CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS);
 
         if (current != null) lastCurrentName = current;
         if (currentPhone != null) lastCurrentPhone = currentPhone;
 
-        if (isNewClientStart) {
-            lastAutoDialAttempts = 0;
-            lastAutoDialMax = 0;
-            lastCurrentPhone = null;
-        } else {
-            lastAutoDialAttempts = attempts;
-            lastAutoDialMax = maxAttempts;
-        }
+        lastAutoDialAttempts = intent.getIntExtra(CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS, lastAutoDialAttempts);
+        lastAutoDialMax = intent.getIntExtra(CampaignProgressDialog.EXTRA_AUTODIAL_MAX, lastAutoDialMax);
 
         refreshBubbleViews();
     }

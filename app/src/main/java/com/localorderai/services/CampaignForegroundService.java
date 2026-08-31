@@ -216,7 +216,23 @@ public class CampaignForegroundService extends Service {
         OrderRecord record = queue.get(queueIndex);
         lastKnownCurrentName = record.customerName;
         lastKnownCurrentPhone = record.phoneNumber;
-        broadcastCurrentName(record.customerName);
+
+        // FIX: كنا بنستخدم broadcastCurrentName() اللي بتبعت الاسم بس
+        // من غير رقم التليفون ومن غير عدد المحاولات، وده كان يخلي
+        // البابل يعرض "-" في مكان الرقم، وكمان يصفّر lastAutoDialMax
+        // في الأوفر لصفر، وده بيمنع عرض عداد المحاولات حتى بعد ما
+        // onAttemptStarted تبعت تحديث صحيح لاحقًا (لأن أي broadcast
+        // جديد للعميل الجديد بيصفّرها تاني). دلوقتي بنبعت بيانات
+        // العميل الجديد كاملة (اسم + رقم) من أول broadcast.
+        broadcastProgress(
+                queueTotal, queueIndex,
+                record.customerName,
+                record.phoneNumber != null ? record.phoneNumber : "",
+                OrderRecord.STATUS_PENDING,
+                config.getMaxAttempts(),
+                config.getDelaySeconds(),
+                0
+        );
         startAutoDialing(record);
     }
 
@@ -378,14 +394,6 @@ public class CampaignForegroundService extends Service {
         b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUTODIAL_ATTEMPTS, autoDialAttempts);
         b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_AUDIO_STATUS,
                 "ميك: " + (config.isRecordingEnabled() ? "مفعّل" : "متوقّف") + " - مكبر: " + (config.isSpeakerEnabled() ? "مفعّل" : "متوقّف"));
-        LocalBroadcastManager.getInstance(this).sendBroadcast(b);
-    }
-
-    private void broadcastCurrentName(String name) {
-        config.saveCampaignState(queueTotal, queueIndex, name, null, 0, 0);
-
-        Intent b = new Intent(com.localorderai.ui.CampaignProgressDialog.ACTION_PROGRESS);
-        b.putExtra(com.localorderai.ui.CampaignProgressDialog.EXTRA_CURRENT_NAME, name);
         LocalBroadcastManager.getInstance(this).sendBroadcast(b);
     }
 

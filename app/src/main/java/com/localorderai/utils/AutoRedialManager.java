@@ -12,10 +12,11 @@ import com.localorderai.ui.AutoCallLauncherActivity;
 /**
  * AutoRedialManager
  * ------------------
- * بيدير محاولات الاتصال المتكررة برقم واحد. بعد ما المكالمة تخلص
- * (Call.STATE_DISCONNECTED)، OrderInCallService بينادي
- * scheduleNextAttemptIfNeeded() اللي إما:
- *   - يوقف لو المكالمة اتوصلت (STATE_ACTIVE حصل فعلاً)
+ * بيدير محاولات الاتصال المتكررة برقم واحد. بعد ما المكالمة تخلص،
+ * TelephonyCallStateListener (المصدر الأساسي، بيشتغل من غير الحاجة
+ * لـ Default Dialer) أو OrderInCallService (لو المستخدم فعّل Default
+ * Dialer) بينادي scheduleNextAttemptIfNeeded() اللي إما:
+ *   - يوقف لو المكالمة اتوصلت (حد رد فعلاً)
  *   - يوقف لو وصلنا للحد الأقصى للمحاولات
  *   - يجدول محاولة جديدة بعد delaySeconds
  *

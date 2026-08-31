@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.localorderai'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.localorderai"
+        minSdk 29
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.fragment:fragment:1.8.2'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.core:core:1.13.1'
+
+    // Room (قاعدة بيانات محلية)
+    implementation 'androidx.room:room-runtime:2.6.1'
+    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+
+    // Lifecycle / LiveData
+    implementation 'androidx.lifecycle:lifecycle-livedata:2.8.4'
+
+    // RecyclerView + LocalBroadcastManager
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
+}

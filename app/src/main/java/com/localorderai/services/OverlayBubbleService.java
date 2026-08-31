@@ -51,6 +51,7 @@ public class OverlayBubbleService extends Service {
     public static final String ACTION_LIVE_SETTINGS_CHANGED = "com.localorderai.LIVE_SETTINGS_CHANGED";
     public static final String EXTRA_MAX_ATTEMPTS = "extra_max_attempts";
     public static final String EXTRA_DELAY_SECONDS = "extra_delay_seconds";
+    public static final String EXTRA_UNTIL_ANSWERED = "extra_until_answered";
 
     /**
      * بتتبعت لما الأوفر تفشل ترسم نفسها فعليًا (إذن ملغي، أو قيد خاص
@@ -62,9 +63,14 @@ public class OverlayBubbleService extends Service {
     public static final String ACTION_BUBBLE_FAILED = "com.localorderai.BUBBLE_FAILED";
 
     private void broadcastLiveSettingsChanged(Integer maxAttempts, Integer delaySeconds) {
+        broadcastLiveSettingsChanged(maxAttempts, delaySeconds, null);
+    }
+
+    private void broadcastLiveSettingsChanged(Integer maxAttempts, Integer delaySeconds, Boolean untilAnswered) {
         Intent b = new Intent(ACTION_LIVE_SETTINGS_CHANGED);
         if (maxAttempts != null) b.putExtra(EXTRA_MAX_ATTEMPTS, (int) maxAttempts);
         if (delaySeconds != null) b.putExtra(EXTRA_DELAY_SECONDS, (int) delaySeconds);
+        if (untilAnswered != null) b.putExtra(EXTRA_UNTIL_ANSWERED, (boolean) untilAnswered);
         LocalBroadcastManager.getInstance(this).sendBroadcast(b);
     }
 
@@ -86,6 +92,7 @@ public class OverlayBubbleService extends Service {
     private TextView tvOverlayCounter, tvOverlayCurrent;
     private TextView tvOverlayAttemptsLabel, tvOverlayDelayLabel;
     private SeekBar seekOverlayAttempts, seekOverlayDelay;
+    private androidx.appcompat.widget.SwitchCompat switchUntilAnswered;
     private TextView btnToggleRecording, btnToggleSpeaker;
 
     private int lastTotal = 0, lastProcessed = 0;
@@ -331,6 +338,7 @@ public class OverlayBubbleService extends Service {
         tvOverlayDelayLabel = panelView.findViewById(R.id.tvOverlayDelayLabel);
         seekOverlayAttempts = panelView.findViewById(R.id.seekOverlayAttempts);
         seekOverlayDelay = panelView.findViewById(R.id.seekOverlayDelay);
+        switchUntilAnswered = panelView.findViewById(R.id.switchUntilAnswered);
         btnToggleRecording = panelView.findViewById(R.id.btnToggleMic);
         btnToggleSpeaker = panelView.findViewById(R.id.btnToggleSpeaker);
     }
@@ -346,10 +354,28 @@ public class OverlayBubbleService extends Service {
         updateAttemptsLabel(attempts);
         updateDelayLabel(delay);
 
+        if (switchUntilAnswered != null) {
+            switchUntilAnswered.setChecked(config.isUntilAnsweredMode());
+        }
+        applyAttemptsControlsEnabledState();
+
         // ملحوظة: زرار المايك في البانل ده خاص بتفعيل *تسجيل* المكالمة
         // (بموافقة صوتية)، مش كتم المايك — ده متاح من الصندوق الرئيسي.
         if (btnToggleRecording != null) btnToggleRecording.setSelected(config.isRecordingEnabled());
         if (btnToggleSpeaker != null) btnToggleSpeaker.setSelected(config.isSpeakerEnabled());
+    }
+
+    /**
+     * لما وضع "لحد ما يرد" مفعّل، سلايدر أقصى عدد المحاولات بيتعطل
+     * بصريًا (مش بيتشال) عشان يوضح للمستخدم إن القيمة دي مش بتتطبق
+     * حاليًا، من غير ما نضطر نخفي الـ view ونغيّر شكل البانل.
+     */
+    private void applyAttemptsControlsEnabledState() {
+        boolean untilAnswered = config.isUntilAnsweredMode();
+        if (seekOverlayAttempts != null) seekOverlayAttempts.setEnabled(!untilAnswered);
+        if (tvOverlayAttemptsLabel != null) {
+            tvOverlayAttemptsLabel.setAlpha(untilAnswered ? 0.4f : 1f);
+        }
     }
 
     private void wireUpPanelListeners() {
@@ -371,6 +397,16 @@ public class OverlayBubbleService extends Service {
                 btnToggleSpeaker.setSelected(newVal);
                 applySpeakerButtonState();
                 TelephonyCallStateListener.applyAudioSettingsLive();
+            });
+        }
+
+        if (switchUntilAnswered != null) {
+            switchUntilAnswered.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                config.setRedialMode(isChecked
+                        ? AppConfig.REDIAL_MODE_UNTIL_ANSWERED
+                        : AppConfig.REDIAL_MODE_MAX_ATTEMPTS);
+                applyAttemptsControlsEnabledState();
+                broadcastLiveSettingsChanged(null, null, isChecked);
             });
         }
 

@@ -44,6 +44,7 @@ public class AutoRedialManager {
     private final String phoneNumber;
     private volatile int maxAttempts;
     private volatile int delaySeconds;
+    private volatile boolean untilAnswered;
     private int currentAttempt = 0;
     private boolean isRunning = false;
     private boolean finishedNotified = false;
@@ -52,15 +53,35 @@ public class AutoRedialManager {
     private RedialListener listener;
 
     public AutoRedialManager(Context context, String phoneNumber, int maxAttempts, int delaySeconds) {
+        this(context, phoneNumber, maxAttempts, delaySeconds, false);
+    }
+
+    /**
+     * untilAnswered: لو true، بيتجاهل maxAttempts تمامًا ويفضل يعيد
+     * المحاولة إلى ما لا نهاية لحد ما حد يرد فعليًا. الفاصل الزمني
+     * (delaySeconds) لسه بيتطبق بين كل محاولة والتانية زي العادي —
+     * الفرق الوحيد إن مفيش سقف لعدد المحاولات.
+     */
+    public AutoRedialManager(Context context, String phoneNumber, int maxAttempts, int delaySeconds, boolean untilAnswered) {
         this.context = context.getApplicationContext();
         this.phoneNumber = phoneNumber;
         // مفيش حد أقصى مصطنع هنا؛ AppConfig نفسه بيحدد سقف 100 محاولة
         this.maxAttempts = Math.max(1, maxAttempts);
         this.delaySeconds = delaySeconds;
+        this.untilAnswered = untilAnswered;
     }
 
     public void setListener(RedialListener listener) {
         this.listener = listener;
+    }
+
+    /**
+     * بيسمح بتحديث امتى الحد يتوقف وقت التشغيل (لو المستخدم غيّر
+     * الإعداد وسط حملة شغالة). زي updateMaxAttempts()، بيأثر على
+     * الرقم الحالي فورًا مش بس الأرقام الجاية.
+     */
+    public void updateUntilAnswered(boolean value) {
+        this.untilAnswered = value;
     }
 
     /**
@@ -108,8 +129,13 @@ public class AutoRedialManager {
             return;
         }
 
-        if (!isRunning || currentAttempt >= maxAttempts) {
-            if (currentAttempt >= maxAttempts && listener != null) {
+        // في وضع untilAnswered، مفيش سقف لعدد المحاولات — بنستمر لحد
+        // ما حد يرد فعليًا (الحالة دي اتعالجت فوق) أو الحملة تتوقف
+        // يدويًا (isRunning بتبقى false في الحالة دي).
+        boolean reachedLimit = !untilAnswered && currentAttempt >= maxAttempts;
+
+        if (!isRunning || reachedLimit) {
+            if (reachedLimit && listener != null) {
                 listener.onMaxAttemptsReached();
             }
             isRunning = false;
@@ -128,8 +154,9 @@ public class AutoRedialManager {
     }
 
     private void placeCall() {
-        if (!isRunning || currentAttempt >= maxAttempts) {
-            if (currentAttempt >= maxAttempts && listener != null) {
+        boolean reachedLimit = !untilAnswered && currentAttempt >= maxAttempts;
+        if (!isRunning || reachedLimit) {
+            if (reachedLimit && listener != null) {
                 listener.onMaxAttemptsReached();
             }
             isRunning = false;

@@ -231,6 +231,26 @@ public class TelephonyCallStateListener {
                 });
     }
 
+    /**
+     * ضبط وضع الصوت (سماعة/كتم مايك) وقت مكالمة شغالة.
+     *
+     * ملحوظة هامة عن زرار السماعة تحديدًا: setMicrophoneMute() بتشتغل
+     * دايمًا وبشكل مستقل (كتم/فتح مايك مباشر على مستوى الهاردوير، مش
+     * مرتبط بأي حاجة تانية). لكن setSpeakerphoneOn() على أندرويد
+     * بتشتغل فعليًا بس لو AudioManager.mode في وضع مكالمة (IN_CALL /
+     * IN_COMMUNICATION) *وقت ما النظام نفسه شايف إن فيه مكالمة تليفون
+     * حقيقية جارية* — وده قرار بياخده الـ System Dialer الفعلي، مش أي
+     * تطبيق عادي. بما إن التطبيق ده مش System Dialer (شلنا الفكرة دي
+     * كليًا)، setMode() المستدعاة من هنا ممكن تتجاهل جزئيًا من النظام
+     * حسب جهاز الـ OEM وإصدار أندرويد، فزرار السماعة ممكن يفضل مش
+     * شغال بشكل موثوق 100% ماداميش التطبيق System Dialer فعليًا —
+     * ده قيد بنيوي في أندرويد نفسه مش خطأ برمجي بسيط.
+     *
+     * التحسين هنا: بنستخدم STREAM_VOICE_CALL صراحة كـ fallback إضافي
+     * (بيشتغل في حالات أكتر من الاعتماد على setSpeakerphoneOn() لوحدها
+     * على بعض الأجهزة)، وبنسجل أي فشل واضح في AppLogger عشان يبان في
+     * سجل الأخطاء لو السماعة فعلاً مش استجابت.
+     */
     private void setAudioModeForCall() {
         try {
             AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
@@ -241,8 +261,26 @@ public class TelephonyCallStateListener {
             boolean speakerOn = config != null && config.isSpeakerEnabled();
             audioManager.setSpeakerphoneOn(speakerOn);
 
+            // fallback: على بعض الأجهزة (خصوصًا Samsung) setSpeakerphoneOn()
+            // مبتتفعّلش فعليًا إلا لو الـ stream الصح متفعّل صراحة كمان.
+            try {
+                audioManager.setStreamVolume(
+                        AudioManager.STREAM_VOICE_CALL,
+                        audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL),
+                        0);
+            } catch (Exception streamEx) {
+                AppLogger.w(TAG, "STREAM_VOICE_CALL fallback failed", streamEx);
+            }
+
             boolean micMuted = config != null && config.isMicMuted();
             audioManager.setMicrophoneMute(micMuted);
+
+            boolean actualSpeakerState = audioManager.isSpeakerphoneOn();
+            if (speakerOn != actualSpeakerState) {
+                AppLogger.w(TAG, "Speaker toggle requested=" + speakerOn
+                        + " but system reports actual=" + actualSpeakerState
+                        + " — likely blocked because app is not the System Dialer");
+            }
 
             Log.d(TAG, "Audio mode set, speaker=" + speakerOn + " micMuted=" + micMuted);
         } catch (Exception e) {

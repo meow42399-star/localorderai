@@ -20,6 +20,7 @@ public class AppConfig {
     private static final String KEY_SPEAKER_ENABLED = "speaker_enabled";
     private static final String KEY_MIC_MUTED = "mic_muted";
     private static final String KEY_SIM_SLOT = "sim_slot";
+    private static final String KEY_REDIAL_MODE = "redial_mode";
 
     // حالة الحملة الحالية — بتتحدث مع كل تقدم، وبتتقرا فورًا لما
     // أي واجهة (الأوفر / شاشة الأرقام الحالية) تتفتح، بدل ما تستنى
@@ -36,6 +37,23 @@ public class AppConfig {
     public static final int SIM_SLOT_ASK_SYSTEM = -1; // خلي النظام يقرر / يسأل المستخدم
     public static final int SIM_SLOT_1 = 0;
     public static final int SIM_SLOT_2 = 1;
+
+    /**
+     * وضع إعادة الاتصال — بيحدد امتى يتوقف الاتصال المتكرر على رقم
+     * معين وينتقل للرقم اللي بعده.
+     *
+     * MAX_ATTEMPTS: يوقف بعد عدد محاولات محدد (getMaxAttempts())، بغض
+     * النظر هل حد رد أو لأ. ده السلوك الافتراضي القديم.
+     *
+     * UNTIL_ANSWERED: يفضل يعيد المحاولة من غير حد أقصى لحد ما حد يرد
+     * فعليًا، وبعدها يوقف على الرقم ده وينتقل للي بعده.
+     *
+     * مصمّمة كـ String enum (مش boolean) عشان تسمح بإضافة أوضاع تانية
+     * مستقبلاً (مثلاً: "حد أقصى للوقت الكلي" أو "حد أقصى مضاعف لو
+     * الرقم مشغول") من غير ما نحتاج نعيد تصميم الإعداد من الأول.
+     */
+    public static final String REDIAL_MODE_MAX_ATTEMPTS = "max_attempts";
+    public static final String REDIAL_MODE_UNTIL_ANSWERED = "until_answered";
 
     private final SharedPreferences prefs;
 
@@ -59,6 +77,22 @@ public class AppConfig {
 
     public void setDelaySeconds(int value) {
         prefs.edit().putInt(KEY_DELAY_SECONDS, Math.max(1, Math.min(value, 999))).apply();
+    }
+
+    /** الافتراضي: MAX_ATTEMPTS (نفس السلوك القديم قبل ما الإعداد ده يتضاف). */
+    public String getRedialMode() {
+        return prefs.getString(KEY_REDIAL_MODE, REDIAL_MODE_MAX_ATTEMPTS);
+    }
+
+    public void setRedialMode(String mode) {
+        if (!REDIAL_MODE_MAX_ATTEMPTS.equals(mode) && !REDIAL_MODE_UNTIL_ANSWERED.equals(mode)) {
+            mode = REDIAL_MODE_MAX_ATTEMPTS;
+        }
+        prefs.edit().putString(KEY_REDIAL_MODE, mode).apply();
+    }
+
+    public boolean isUntilAnsweredMode() {
+        return REDIAL_MODE_UNTIL_ANSWERED.equals(getRedialMode());
     }
 
     public boolean isRecordingEnabled() {

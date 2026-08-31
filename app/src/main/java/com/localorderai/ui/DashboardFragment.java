@@ -49,7 +49,7 @@ public class DashboardFragment extends Fragment {
     private TextInputEditText editCustomerName, editPhoneNumber, editOrderReference;
     private TextInputEditText editBulkOrders;
     private SeekBar seekMaxAttempts, seekDelaySeconds;
-    private SwitchMaterial switchRecording, switchAutoDialing;
+    private SwitchMaterial switchRecording, switchAutoDialing, switchUntilAnswered;
     private MaterialButtonToggleGroup toggleSimSlot;
     private TextView txtStatus, txtMaxAttemptsValue, txtDelayValue;
     private TextView txtUpdateStatus;
@@ -88,6 +88,7 @@ public class DashboardFragment extends Fragment {
         seekDelaySeconds = root.findViewById(R.id.seekDelaySeconds);
         switchRecording = root.findViewById(R.id.switchRecording);
         switchAutoDialing = root.findViewById(R.id.switchAutoDialing);
+        switchUntilAnswered = root.findViewById(R.id.switchUntilAnswered);
         toggleSimSlot = root.findViewById(R.id.toggleSimSlot);
         txtStatus = root.findViewById(R.id.txtStatus);
         txtMaxAttemptsValue = root.findViewById(R.id.txtMaxAttemptsValue);
@@ -100,6 +101,8 @@ public class DashboardFragment extends Fragment {
         seekDelaySeconds.setProgress(config.getDelaySeconds());
         switchRecording.setChecked(config.isRecordingEnabled());
         switchAutoDialing.setChecked(config.isAutoDialingEnabled());
+        switchUntilAnswered.setChecked(config.isUntilAnsweredMode());
+        applyUntilAnsweredUiState();
         updateDelayLabel();
         updateAttemptsLabel();
 
@@ -165,6 +168,20 @@ public class DashboardFragment extends Fragment {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
+
+        switchUntilAnswered.setOnCheckedChangeListener((buttonView, isChecked) -> applyUntilAnsweredUiState());
+    }
+
+    /**
+     * لما "إعادة الاتصال حتى يرد العميل" مفعّلة، بنعطّل سلايدر أقصى
+     * عدد المحاولات بصريًا (مش بنخفيه) عشان يوضح للمستخدم إن القيمة
+     * دي مش هتتطبق طول ما الوضع ده شغال.
+     */
+    private void applyUntilAnsweredUiState() {
+        boolean untilAnswered = switchUntilAnswered.isChecked();
+        seekMaxAttempts.setEnabled(!untilAnswered);
+        seekMaxAttempts.setAlpha(untilAnswered ? 0.4f : 1f);
+        txtMaxAttemptsValue.setAlpha(untilAnswered ? 0.4f : 1f);
     }
 
     private void saveSettings() {
@@ -172,6 +189,9 @@ public class DashboardFragment extends Fragment {
         config.setDelaySeconds(Math.max(seekDelaySeconds.getProgress(), 1));
         config.setRecordingEnabled(switchRecording.isChecked());
         config.setAutoDialingEnabled(switchAutoDialing.isChecked());
+        config.setRedialMode(switchUntilAnswered.isChecked()
+                ? AppConfig.REDIAL_MODE_UNTIL_ANSWERED
+                : AppConfig.REDIAL_MODE_MAX_ATTEMPTS);
         config.setSimSlot(selectedSimSlot());
 
         Toast.makeText(requireContext(), "تم حفظ الإعدادات بنجاح", Toast.LENGTH_SHORT).show();

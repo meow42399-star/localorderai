@@ -105,6 +105,9 @@ public class CampaignForegroundService extends Service {
             if (intent.hasExtra(OverlayBubbleService.EXTRA_DELAY_SECONDS)) {
                 currentRedial.updateDelaySeconds(intent.getIntExtra(OverlayBubbleService.EXTRA_DELAY_SECONDS, config.getDelaySeconds()));
             }
+            if (intent.hasExtra(OverlayBubbleService.EXTRA_UNTIL_ANSWERED)) {
+                currentRedial.updateUntilAnswered(intent.getBooleanExtra(OverlayBubbleService.EXTRA_UNTIL_ANSWERED, config.isUntilAnsweredMode()));
+            }
         }
     };
 
@@ -328,7 +331,8 @@ public class CampaignForegroundService extends Service {
                     getApplicationContext(),
                     record.phoneNumber,
                     config.getMaxAttempts(),
-                    config.getDelaySeconds()
+                    config.getDelaySeconds(),
+                    config.isUntilAnsweredMode()
             );
             currentRedial = redial;
 

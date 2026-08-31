@@ -306,12 +306,12 @@ public class DashboardFragment extends Fragment {
             return;
         }
 
-        // ملحوظة: مش لازم LocalOrderAI يبقى Default Phone App عشان
-        // الاتصال المتكرر (redial) يشتغل. الحملة بتتابع حالة المكالمة
-        // عن طريق TelephonyManager مباشرة (TelephonyCallStateListener)،
-        // اللي بيحتاج بس READ_PHONE_STATE (ممنوح أصلًا)، ومبيحتاجش
-        // دور Default Dialer خالص. لو حد فعّل Default Dialer برضه هيشتغل
-        // عادي جنبها من غير تعارض.
+        // ملحوظة: التطبيق شال خاصية Default Dialer خالص من كل الكود.
+        // الاتصال بيتم عن طريق دايلر النظام العادي، ومتابعة حالة
+        // المكالمة (رنّت/اترّدت/خلصت) بتتم عن طريق TelephonyManager
+        // مباشرة (TelephonyCallStateListener)، اللي بيحتاج بس
+        // READ_PHONE_STATE (ممنوح أصلًا). مفيش أي حاجة في التطبيق
+        // بتطلب أو بتحتاج دور Default Dialer.
 
         // بنبدأ الأوفر الأول قبل خدمة الحملة، عشان المستقبِل بتاعه
         // يبقى مسجل قبل ما أي broadcast يتبعت. وحتى لو حصل تأخير،
@@ -444,7 +444,6 @@ public class DashboardFragment extends Fragment {
         View dotCall = root.findViewById(R.id.dotCall);
         View dotRecord = root.findViewById(R.id.dotRecord);
         View dotNotif = root.findViewById(R.id.dotNotif);
-        View dotDialer = root.findViewById(R.id.dotDialer);
 
         boolean callOk = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
         boolean recOk = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
@@ -452,52 +451,10 @@ public class DashboardFragment extends Fragment {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifOk = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         }
-        boolean isDefaultDialer = isDefaultDialerApp();
 
         if (dotCall != null) dotCall.setBackgroundResource(callOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotRecord != null) dotRecord.setBackgroundResource(recOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
         if (dotNotif != null) dotNotif.setBackgroundResource(notifOk ? R.drawable.status_dot_green : R.drawable.status_dot_red);
-        if (dotDialer != null) dotDialer.setBackgroundResource(isDefaultDialer ? R.drawable.status_dot_green : R.drawable.status_dot_red);
-
-        View tvDialer = root.findViewById(R.id.tvDialerPermission);
-        if (tvDialer != null) {
-            tvDialer.setOnClickListener(v -> {
-                if (!isDefaultDialer) {
-                    promptSetDefaultDialer();
-                } else {
-                    Toast.makeText(requireContext(), "التطبيق مضبوط كـ Default Phone App بالفعل ✅", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
-        if (dotDialer != null && !isDefaultDialer) {
-            dotDialer.setOnClickListener(v -> promptSetDefaultDialer());
-        }
-    }
-
-    /**
-     * إعادة الاتصال التلقائي (redial) بعد ما مكالمة تخلص بتعتمد على
-     * OrderInCallService، واللي مش بيستقبل أي أحداث من نظام التليفون
-     * إلا لو التطبيق متظبط كـ "Default Phone App".
-     */
-    private boolean isDefaultDialerApp() {
-        try {
-            android.telecom.TelecomManager telecomManager =
-                    (android.telecom.TelecomManager) requireContext().getSystemService(android.content.Context.TELECOM_SERVICE);
-            if (telecomManager == null) return false;
-            return requireContext().getPackageName().equals(telecomManager.getDefaultDialerPackage());
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private void promptSetDefaultDialer() {
-        try {
-            Intent intent = new Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER);
-            intent.putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, requireContext().getPackageName());
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(requireContext(), "من فضلك فعّل التطبيق كـ Default Phone App يدويًا من إعدادات النظام حتى يعمل الاتصال المتكرر التلقائي", Toast.LENGTH_LONG).show();
-        }
     }
 
     private void validatePhone() {

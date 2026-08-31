@@ -13,9 +13,9 @@ import com.localorderai.ui.AutoCallLauncherActivity;
  * AutoRedialManager
  * ------------------
  * بيدير محاولات الاتصال المتكررة برقم واحد. بعد ما المكالمة تخلص،
- * TelephonyCallStateListener (المصدر الأساسي، بيشتغل من غير الحاجة
- * لـ Default Dialer) أو OrderInCallService (لو المستخدم فعّل Default
- * Dialer) بينادي scheduleNextAttemptIfNeeded() اللي إما:
+ * TelephonyCallStateListener (بيتابع الحالة عن طريق TelephonyManager،
+ * من غير أي حاجة لدور Default Dialer) بينادي scheduleNextAttemptIfNeeded()
+ * اللي إما:
  *   - يوقف لو المكالمة اتوصلت (حد رد فعلاً)
  *   - يوقف لو وصلنا للحد الأقصى للمحاولات
  *   - يجدول محاولة جديدة بعد delaySeconds
@@ -97,8 +97,8 @@ public class AutoRedialManager {
     }
 
     /**
-     * بينادى من OrderInCallService بعد ما مكالمة تخلص.
-     * wasAnswered: true لو المكالمة كانت STATE_ACTIVE فعلاً (يعني حد رد).
+     * بينادى من TelephonyCallStateListener بعد ما مكالمة تخلص.
+     * wasAnswered: true لو المكالمة كانت اتردت فعلاً (حد رد).
      */
     public void scheduleNextAttemptIfNeeded(boolean wasAnswered) {
         if (wasAnswered) {

@@ -36,23 +36,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!--
-                لازم Activity واحدة على الأقل تستقبل ACTION_DIAL عشان
-                التطبيق يبقى "مؤهل" (eligible) أساسًا يظهر كخيار في
-                شاشة "Default Phone App" بتاعة النظام. من غيرها،
-                ACTION_CHANGE_DEFAULT_DIALER بيفشل أو النظام بيرفض
-                التطبيق كخيار من الأساس، والحماية في startCampaign()
-                (فحص isDefaultDialerApp) بتبقى عديمة الفايدة عمليًا.
-            -->
-            <intent-filter>
-                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="tel" />
-            </intent-filter>
         </activity>
 
         <activity
@@ -71,24 +54,6 @@
         <service
             android:name=".services.OverlayBubbleService"
             android:exported="false" />
-
-        <!--
-            OrderInCallService: محتاج المستخدم يختار التطبيق كـ
-            "Default Phone App" يدويًا من إعدادات النظام — ده مش
-            بيتعمل برمجيًا، ولازم يبان بوضوح للمستخدم في الـ onboarding
-            إيه اللي هيحصل ولو محتاج.
-        -->
-        <service
-            android:name=".services.OrderInCallService"
-            android:permission="android.permission.BIND_INCALL_SERVICE"
-            android:exported="true">
-            <meta-data
-                android:name="android.telecom.IN_CALL_SERVICE_UI"
-                android:value="true" />
-            <intent-filter>
-                <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -61,12 +61,10 @@ public class CampaignForegroundService extends Service {
 
     private AutoRedialManager currentRedial;
 
-    // FIX: TelephonyManager بيتابع حالة المكالمة (رنّت/اترّدت/خلصت) من
-    // غير ما يحتاج التطبيق يبقى Default Dialer — عكس OrderInCallService
-    // اللي محتاج الدور ده صراحة عشان يشتغل. ده بقى المصدر الأساسي
-    // اللي بيشغّل الـ redial؛ OrderInCallService بيفضل شغال كمان لو
-    // حد فعّل Default Dialer فعلاً (الاتنين آمنين مع بعض، AutoRedialManager
-    // بيتجاهل أي نداء إضافي بعد أول onFinished).
+    // FIX: التطبيق شال خاصية Default Dialer خالص من كل الكود.
+    // TelephonyCallStateListener هو المصدر الوحيد لمتابعة حالة المكالمة
+    // (رنّت/اترّدت/خلصت) وتشغيل الـ redial، وبيعتمد على TelephonyManager
+    // بس — مش محتاج أي دور خاص من النظام.
     private TelephonyCallStateListener telephonyListener;
     private boolean telephonyWasAnswered = false;
 
@@ -350,7 +348,6 @@ public class CampaignForegroundService extends Service {
                 }
             });
 
-            OrderInCallService.injectRedialManager(redial);
             redial.start();
 
         } catch (Exception e) {

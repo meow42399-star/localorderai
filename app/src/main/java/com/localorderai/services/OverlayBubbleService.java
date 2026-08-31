@@ -208,7 +208,7 @@ public class OverlayBubbleService extends Service {
                 boolean newMuted = !config.isMicMuted();
                 config.setMicMuted(newMuted);
                 applyMicButtonState();
-                OrderInCallService.applyAudioSettingsLive();
+                TelephonyCallStateListener.applyAudioSettingsLive();
             });
         }
 
@@ -217,7 +217,7 @@ public class OverlayBubbleService extends Service {
                 boolean newVal = !config.isSpeakerEnabled();
                 config.setSpeakerEnabled(newVal);
                 applySpeakerButtonState();
-                OrderInCallService.applyAudioSettingsLive();
+                TelephonyCallStateListener.applyAudioSettingsLive();
             });
         }
 
@@ -347,7 +347,7 @@ public class OverlayBubbleService extends Service {
                 config.setSpeakerEnabled(newVal);
                 btnToggleSpeaker.setSelected(newVal);
                 applySpeakerButtonState();
-                OrderInCallService.applyAudioSettingsLive();
+                TelephonyCallStateListener.applyAudioSettingsLive();
             });
         }
 

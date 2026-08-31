@@ -30,6 +30,7 @@ import com.google.android.material.button.MaterialButton;
 import com.localorderai.R;
 import com.localorderai.data.AppConfig;
 import com.localorderai.ui.CampaignProgressDialog;
+import com.localorderai.utils.AppLogger;
 
 /**
  * OverlayBubbleService
@@ -108,7 +109,7 @@ public class OverlayBubbleService extends Service {
         try {
             addBubble();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to add overlay bubble", e);
+            AppLogger.e(TAG, "Failed to add overlay bubble", e);
             try {
                 LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent(ACTION_BUBBLE_FAILED));
             } catch (Exception ignored) {}
@@ -120,7 +121,7 @@ public class OverlayBubbleService extends Service {
             LocalBroadcastManager.getInstance(this).registerReceiver(
                     progressReceiver, new IntentFilter(CampaignProgressDialog.ACTION_PROGRESS));
         } catch (Exception e) {
-            Log.e(TAG, "Failed to register progress receiver", e);
+            AppLogger.e(TAG, "Failed to register progress receiver", e);
         }
 
         // نقرا آخر حالة معروفة للحملة فورًا من AppConfig بدل ما ننتظر
@@ -250,7 +251,7 @@ public class OverlayBubbleService extends Service {
         try {
             windowManager.addView(bubbleView, bubbleParams);
         } catch (Exception e) {
-            Log.e(TAG, "windowManager.addView failed - permission likely missing", e);
+            AppLogger.e(TAG, "windowManager.addView failed - permission likely missing", e);
             throw e;
         }
     }
@@ -307,7 +308,7 @@ public class OverlayBubbleService extends Service {
             windowManager.addView(panelView, panelParams);
             isPanelShowing = true;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to show overlay panel", e);
+            AppLogger.e(TAG, "Failed to show overlay panel", e);
             panelView = null;
             isPanelShowing = false;
         }

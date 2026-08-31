@@ -147,7 +147,7 @@ public class AutoRedialManager {
         // ترسم نفسها من الأساس)، لكن الفحص هنا بيغطي حالة إن الأوفر
         // اتقفلت لاحقًا (مثلاً المستخدم لغى الإذن يدويًا وسط الحملة).
         if (!hasOverlayPermission()) {
-            Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted — call launch from background will likely be silently blocked");
+            AppLogger.w(TAG, "SYSTEM_ALERT_WINDOW not granted — call launch from background will likely be silently blocked");
         }
 
         currentAttempt++;
@@ -160,11 +160,11 @@ public class AutoRedialManager {
             context.startActivity(launcherIntent);
             Log.d(TAG, "Launched AutoCallLauncherActivity for attempt " + currentAttempt);
         } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException launching call activity", e);
+            AppLogger.e(TAG, "SecurityException launching call activity", e);
             isRunning = false;
             notifyFinished(false);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to launch call activity", e);
+            AppLogger.e(TAG, "Failed to launch call activity", e);
             isRunning = false;
             notifyFinished(false);
         }

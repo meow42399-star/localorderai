@@ -1,5 +1,7 @@
 package com.localorderai.services;
 
+import com.localorderai.utils.AppLogger;
+
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -96,11 +98,11 @@ public class TelephonyCallStateListener {
 
     public void start() {
         if (telephonyManager == null) {
-            Log.w(TAG, "TelephonyManager not available, skipping call state listening.");
+            AppLogger.w(TAG, "TelephonyManager not available, skipping call state listening.");
             return;
         }
         if (!hasReadPhoneStatePermission()) {
-            Log.w(TAG, "READ_PHONE_STATE permission missing, skipping call state listening.");
+            AppLogger.w(TAG, "READ_PHONE_STATE permission missing, skipping call state listening.");
             return;
         }
 
@@ -115,9 +117,9 @@ public class TelephonyCallStateListener {
                 startLegacy();
             }
         } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException while registering call state listener", e);
+            AppLogger.e(TAG, "SecurityException while registering call state listener", e);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to register call state listener", e);
+            AppLogger.e(TAG, "Failed to register call state listener", e);
         }
     }
 
@@ -134,7 +136,7 @@ public class TelephonyCallStateListener {
                 legacyListener = null;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to unregister call state listener", e);
+            AppLogger.e(TAG, "Failed to unregister call state listener", e);
         }
     }
 
@@ -224,7 +226,7 @@ public class TelephonyCallStateListener {
 
                     @Override
                     public void onError(String message) {
-                        Log.e(TAG, "Consent announcement failed, recording aborted: " + message);
+                        AppLogger.e(TAG, "Consent announcement failed, recording aborted: " + message);
                     }
                 });
     }
@@ -244,7 +246,7 @@ public class TelephonyCallStateListener {
 
             Log.d(TAG, "Audio mode set, speaker=" + speakerOn + " micMuted=" + micMuted);
         } catch (Exception e) {
-            Log.e(TAG, "setAudioModeForCall failed", e);
+            AppLogger.e(TAG, "setAudioModeForCall failed", e);
         }
     }
 }

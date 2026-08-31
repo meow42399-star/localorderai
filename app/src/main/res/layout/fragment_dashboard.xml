@@ -394,6 +394,15 @@
                     android:textSize="13sp"
                     android:textColor="@color/text_secondary" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnShareLogs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="مشاركة سجل الأخطاء"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    app:cornerRadius="14dp" />
+
                 <TextView
                     android:id="@+id/txtStatus"
                     android:layout_width="match_parent"

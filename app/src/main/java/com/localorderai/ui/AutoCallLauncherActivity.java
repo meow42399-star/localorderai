@@ -1,5 +1,7 @@
 package com.localorderai.ui;
 
+import com.localorderai.utils.AppLogger;
+
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
@@ -46,14 +48,14 @@ public class AutoCallLauncherActivity extends Activity {
         String phoneNumber = getIntent().getStringExtra(EXTRA_PHONE_NUMBER);
 
         if (phoneNumber == null || phoneNumber.trim().isEmpty()) {
-            Log.e(TAG, "No phone number provided");
+            AppLogger.e(TAG, "No phone number provided");
             finish();
             return;
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
                 != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "CALL_PHONE permission not granted");
+            AppLogger.e(TAG, "CALL_PHONE permission not granted");
             finish();
             return;
         }
@@ -71,9 +73,9 @@ public class AutoCallLauncherActivity extends Activity {
             Log.d(TAG, "ACTION_CALL dispatched for: " + phoneNumber
                     + (handle != null ? " via selected SIM" : " (default SIM)"));
         } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException while placing call", e);
+            AppLogger.e(TAG, "SecurityException while placing call", e);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to place call", e);
+            AppLogger.e(TAG, "Failed to place call", e);
         } finally {
             finish();
         }
@@ -92,7 +94,7 @@ public class AutoCallLauncherActivity extends Activity {
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
                 != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "READ_PHONE_STATE not granted - cannot resolve SIM accounts, using default");
+            AppLogger.w(TAG, "READ_PHONE_STATE not granted - cannot resolve SIM accounts, using default");
             return null;
         }
 
@@ -107,13 +109,13 @@ public class AutoCallLauncherActivity extends Activity {
                 return accounts.get(simSlot);
             }
 
-            Log.w(TAG, "Requested SIM slot " + simSlot + " not available, only " + accounts.size() + " found");
+            AppLogger.w(TAG, "Requested SIM slot " + simSlot + " not available, only " + accounts.size() + " found");
             return null;
         } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException reading phone accounts", e);
+            AppLogger.e(TAG, "SecurityException reading phone accounts", e);
             return null;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to resolve SIM account", e);
+            AppLogger.e(TAG, "Failed to resolve SIM account", e);
             return null;
         }
     }

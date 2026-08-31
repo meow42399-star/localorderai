@@ -104,7 +104,7 @@ public class UpdateManager {
                     mainHandler.post(callback::onUpToDate);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "checkForUpdate failed", e);
+                AppLogger.e(TAG, "checkForUpdate failed", e);
                 postError(callback, "تعذر الاتصال بـ GitHub: " + e.getMessage());
             }
         });
@@ -242,7 +242,7 @@ public class UpdateManager {
             callback.onDownloadStarted();
 
         } catch (Exception e) {
-            Log.e(TAG, "downloadAndInstall failed", e);
+            AppLogger.e(TAG, "downloadAndInstall failed", e);
             callback.onDownloadFailed(e.getMessage());
         }
     }
@@ -282,7 +282,7 @@ public class UpdateManager {
                         cursor.close();
 
                         if (status != DownloadManager.STATUS_SUCCESSFUL) {
-                            Log.e(TAG, "Download failed, status=" + status + " reason=" + reason);
+                            AppLogger.e(TAG, "Download failed, status=" + status + " reason=" + reason);
                             callback.onDownloadFailed("فشل التحميل (status=" + status + ", reason=" + reason + ")");
                             return;
                         }
@@ -290,7 +290,7 @@ public class UpdateManager {
                 }
 
                 if (!apkFile.exists()) {
-                    Log.e(TAG, "Download reported complete but file not found: " + apkFile);
+                    AppLogger.e(TAG, "Download reported complete but file not found: " + apkFile);
                     callback.onDownloadFailed("التحميل خلص لكن الملف مش موجود");
                     return;
                 }
@@ -327,7 +327,7 @@ public class UpdateManager {
 
             context.startActivity(installIntent);
         } catch (Exception e) {
-            Log.e(TAG, "promptInstall failed", e);
+            AppLogger.e(TAG, "promptInstall failed", e);
             // مكناش بنعمل حاجة هنا قبل كده، فلو فتح شاشة التثبيت فشل
             // (مسار FileProvider غلط، أو مفيش تطبيق يقدر يفتح النوع ده)
             // المستخدم مكانش بياخد أي تنبيه خالص والتحميل كان بيبان

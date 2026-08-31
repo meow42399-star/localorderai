@@ -18,6 +18,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.localorderai.R;
 import com.localorderai.data.*;
 import com.localorderai.utils.AutoRedialManager;
+import com.localorderai.utils.AppLogger;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -83,7 +84,7 @@ public class CampaignForegroundService extends Service {
     private final BroadcastReceiver bubbleFailedReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            Log.e(TAG, "Overlay bubble failed to render — stopping campaign, background calls would be silently blocked");
+            AppLogger.e(TAG, "Overlay bubble failed to render — stopping campaign, background calls would be silently blocked");
             mainHandler.post(() -> Toast.makeText(getApplicationContext(),
                     "تعذّر عرض الفقاعة العائمة، فتم إيقاف الحملة. تأكد من تفعيل إذن \"الظهور فوق التطبيقات الأخرى\" وحاول تاني.",
                     Toast.LENGTH_LONG).show());
@@ -156,7 +157,7 @@ public class CampaignForegroundService extends Service {
         try {
             startForeground(NOTIFICATION_ID, buildNotification("جاري تشغيل الحملة..."));
         } catch (Exception e) {
-            Log.e(TAG, "startForeground failed, stopping service safely", e);
+            AppLogger.e(TAG, "startForeground failed, stopping service safely", e);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -172,7 +173,7 @@ public class CampaignForegroundService extends Service {
             }
             startCampaign();
         } catch (Exception e) {
-            Log.e(TAG, "onStartCommand failed unexpectedly", e);
+            AppLogger.e(TAG, "onStartCommand failed unexpectedly", e);
             isCampaignRunning = false;
         }
 
@@ -201,7 +202,7 @@ public class CampaignForegroundService extends Service {
             Intent bubbleIntent = new Intent(this, OverlayBubbleService.class);
             startService(bubbleIntent);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start OverlayBubbleService", e);
+            AppLogger.e(TAG, "Failed to start OverlayBubbleService", e);
         }
 
         executor.execute(() -> {
@@ -241,7 +242,7 @@ public class CampaignForegroundService extends Service {
                 broadcastProgress(queueTotal, 0, null, null, null, 0, 0, 0);
                 processNextInQueue();
             } catch (Exception e) {
-                Log.e(TAG, "startCampaign crashed", e);
+                AppLogger.e(TAG, "startCampaign crashed", e);
                 isCampaignRunning = false;
             }
         });
@@ -315,7 +316,7 @@ public class CampaignForegroundService extends Service {
     private void startAutoDialing(OrderRecord record) {
         try {
             if (record == null || record.phoneNumber == null) {
-                Log.w(TAG, "Cannot start auto-dialing: null record or phone");
+                AppLogger.w(TAG, "Cannot start auto-dialing: null record or phone");
                 advanceQueue();
                 return;
             }
@@ -383,7 +384,7 @@ public class CampaignForegroundService extends Service {
                     try {
                         processed = db.orderRecordDao().countProcessed();
                     } catch (Exception e) {
-                        Log.e(TAG, "countProcessed failed", e);
+                        AppLogger.e(TAG, "countProcessed failed", e);
                     }
 
                     broadcastProgress(
@@ -403,7 +404,7 @@ public class CampaignForegroundService extends Service {
             redial.start();
 
         } catch (Exception e) {
-            Log.e(TAG, "Error starting auto-dialing", e);
+            AppLogger.e(TAG, "Error starting auto-dialing", e);
             safeUpdateRecord(record, OrderRecord.STATUS_FAILED);
             advanceQueue();
         }
@@ -423,7 +424,7 @@ public class CampaignForegroundService extends Service {
             record.lastUpdatedAt = new java.util.Date();
             db.orderRecordDao().update(record);
         } catch (Exception e) {
-            Log.e(TAG, "safeUpdateRecord failed for status=" + status, e);
+            AppLogger.e(TAG, "safeUpdateRecord failed for status=" + status, e);
         }
     }
 

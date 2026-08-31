@@ -31,6 +31,7 @@ import com.localorderai.data.AppDatabase;
 import com.localorderai.data.OrderRecord;
 import com.localorderai.services.CampaignForegroundService;
 import com.localorderai.services.OverlayBubbleService;
+import com.localorderai.utils.AppLogger;
 import com.localorderai.utils.UpdateManager;
 
 import java.util.concurrent.Executors;
@@ -142,6 +143,11 @@ public class DashboardFragment extends Fragment {
         MaterialButton btnCheckUpdate = root.findViewById(R.id.btnCheckUpdate);
         if (btnCheckUpdate != null) {
             btnCheckUpdate.setOnClickListener(v -> checkForUpdate());
+        }
+
+        MaterialButton btnShareLogs = root.findViewById(R.id.btnShareLogs);
+        if (btnShareLogs != null) {
+            btnShareLogs.setOnClickListener(v -> shareLogFile());
         }
 
         seekMaxAttempts.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -392,6 +398,37 @@ public class DashboardFragment extends Fragment {
                 Toast.makeText(requireContext(), "فشل التحقق: " + message, Toast.LENGTH_LONG).show();
             }
         });
+    }
+
+    /**
+     * بيفتح شاشة المشاركة العادية بتاعت أندرويد (واتساب، إيميل، إلخ)
+     * لملف سجل الأخطاء المحلي (crash_log.txt). الملف ده بيتحدّث
+     * أوتوماتيك من AppLogger كل ما يحصل خطأ في أي مكان في التطبيق —
+     * فلو حصلت مشكلة، الزرار ده أسرع طريقة تبعت التفاصيل الدقيقة
+     * بدل ما تحاول توصف اللي حصل بالكلام.
+     */
+    private void shareLogFile() {
+        java.io.File logFile = AppLogger.getLogFile(requireContext());
+        if (!logFile.exists() || logFile.length() == 0) {
+            Toast.makeText(requireContext(), "مفيش أخطاء مسجّلة لحد دلوقتي", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            android.net.Uri logUri = androidx.core.content.FileProvider.getUriForFile(
+                    requireContext(), requireContext().getPackageName() + ".fileprovider", logFile);
+
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, logUri);
+            shareIntent.putExtra(Intent.EXTRA_SUBJECT, "LocalOrderAI - سجل الأخطاء");
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            startActivity(Intent.createChooser(shareIntent, "مشاركة سجل الأخطاء"));
+        } catch (Exception e) {
+            AppLogger.e("DashboardFragment", "Failed to share log file", e);
+            Toast.makeText(requireContext(), "تعذّرت مشاركة السجل: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void startDownload(String versionName, String downloadUrl) {

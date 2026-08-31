@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="reports" path="reports/" />
+    <files-path name="logs" path="." />
     <external-files-path name="updates" path="." />
 </paths>

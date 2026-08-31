@@ -300,29 +300,29 @@ public class DashboardFragment extends Fragment {
             return;
         }
 
+        // FIX: بما إن التطبيق مبقاش محتاج Default Dialer خالص، متابعة
+        // حالة المكالمة (رنّت/اترّدت/خلصت) وتشغيل الـ redial بيعتمدوا
+        // بالكامل على READ_PHONE_STATE عن طريق TelephonyCallStateListener.
+        // من غير الإذن ده، الحملة كانت بتبدأ عادي بس المكالمة ميرنش
+        // تاني ومعلومات البابل ميتحدثش، من غير أي رسالة توضح السبب.
+        // دلوقتي بنفحصه صراحة قبل البدء.
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(requireContext(), "يجب منح إذن \"حالة الهاتف\" (Phone State) حتى تعمل إعادة الاتصال التلقائي بعد انتهاء كل مكالمة.", Toast.LENGTH_LONG).show();
+            requestNecessaryPermissions();
+            return;
+        }
+
         if (!hasOverlayPermission()) {
             Toast.makeText(requireContext(), "من فضلك فعّل إذن \"الظهور فوق التطبيقات الأخرى\" أولًا", Toast.LENGTH_LONG).show();
             requestOverlayPermission();
             return;
         }
 
-        // ملحوظة: التطبيق شال خاصية Default Dialer خالص من كل الكود.
-        // الاتصال بيتم عن طريق دايلر النظام العادي، ومتابعة حالة
-        // المكالمة (رنّت/اترّدت/خلصت) بتتم عن طريق TelephonyManager
-        // مباشرة (TelephonyCallStateListener)، اللي بيحتاج بس
-        // READ_PHONE_STATE (ممنوح أصلًا). مفيش أي حاجة في التطبيق
-        // بتطلب أو بتحتاج دور Default Dialer.
-
-        // بنبدأ الأوفر الأول قبل خدمة الحملة، عشان المستقبِل بتاعه
-        // يبقى مسجل قبل ما أي broadcast يتبعت. وحتى لو حصل تأخير،
-        // الأوفر بيقرا آخر حالة محفوظة من AppConfig فورًا برضو.
-        try {
-            Intent bubbleIntent = new Intent(requireContext(), OverlayBubbleService.class);
-            requireContext().startService(bubbleIntent);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
+        // FIX: OverlayBubbleService بقت بتتفتح من جوه CampaignForegroundService
+        // نفسها (مش من هنا)، عشان نضمن ترتيب صحيح: الأوفر تتأسس وتسجل
+        // الـ receiver بتاعها قبل ما أي broadcast يتبعت. ده حل مشكلة
+        // ظهور البابل فاضية ("-") في بعض الأجهزة (خصوصًا Samsung/One UI
+        // اللي بيأخر بدء الخدمات في الخلفية).
         Intent serviceIntent = new Intent(requireContext(), CampaignForegroundService.class);
         try {
             ContextCompat.startForegroundService(requireContext(), serviceIntent);

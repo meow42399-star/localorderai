@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
@@ -169,8 +170,30 @@ public class CampaignForegroundService extends Service {
             telephonyListener.start();
         }
 
+        // FIX: كانت OverlayBubbleService بتتفتح من DashboardFragment
+        // قبل ما نستدعي startForegroundService للحملة، لكن startService
+        // مش متزامن (onCreate بتاعها بياخد وقت، وبتسجل progressReceiver
+        // جواه). في الأجهزة البطيئة أو Samsung/One UI (اللي بيأخر بدء
+        // الخدمات في الخلفية)، كان ممكن يحصل إن processNextInQueue()
+        // تبعت أول broadcast قبل ما الأوفر يخلص تسجيل المستقبِل بتاعه،
+        // فالأوفر تفضل فاضية لحد ما تحديث تاني يوصل (أو للأبد لو محدش
+        // وصل). دلوقتي بنفتح الأوفر من هنا، جوه نفس الخدمة اللي هتعالج
+        // الطابور، وبنأخر بدء المعالجة شوية صغير كافي إن الأوفر تتأسس.
+        try {
+            Intent bubbleIntent = new Intent(this, OverlayBubbleService.class);
+            startService(bubbleIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start OverlayBubbleService", e);
+        }
+
         executor.execute(() -> {
             try {
+                // تأخير بسيط عشان OverlayBubbleService تخلص onCreate()
+                // وتسجل الـ receiver بتاعها قبل أول broadcast. لو الأوفر
+                // اتأخرت أكتر من كده، loadPersistedState() بتاعتها
+                // (AppConfig) بتفضل تضمن إنها تعرض آخر حالة صح لما تخلص.
+                Thread.sleep(250);
+
                 List<OrderRecord> pending = db.orderRecordDao().getPendingRecords();
                 queue = pending != null ? pending : new java.util.ArrayList<>();
                 queueIndex = 0;
@@ -180,9 +203,20 @@ public class CampaignForegroundService extends Service {
                 mainHandler.post(() -> updateNotification("عدد الطلبات المعلّقة: " + queueTotal));
 
                 if (queue.isEmpty()) {
-                    mainHandler.post(() -> updateNotification("لا توجد طلبات معلقة"));
+                    mainHandler.post(() -> {
+                        updateNotification("لا توجد طلبات معلقة");
+                        Toast.makeText(getApplicationContext(),
+                                "لا توجد طلبات معلّقة (Pending) للاتصال بها. أضف طلب جديد أولًا.",
+                                Toast.LENGTH_LONG).show();
+                    });
                     isCampaignRunning = false;
                     config.setCampaignRunning(false);
+                    if (telephonyListener != null) telephonyListener.stop();
+                    // بنقفل الأوفر (لو فاتح) عشان مايفضلش يعرض بابل فاضية
+                    // من غير أي حملة شغالة فعليًا.
+                    stopService(new Intent(this, OverlayBubbleService.class));
+                    stopForeground(true);
+                    stopSelf();
                     return;
                 }
 

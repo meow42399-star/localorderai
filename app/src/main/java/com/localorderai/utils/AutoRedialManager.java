@@ -137,9 +137,17 @@ public class AutoRedialManager {
             return;
         }
 
-        // تحذير مسبق لو إذن الفقاعة العائمة (اللي بيسمح ببدء الأنشطة من الخلفية) مش ممنوح
+        // تحذير مسبق لو إذن الفقاعة العائمة (اللي بيسمح ببدء الأنشطة من الخلفية) مش ممنوح.
+        // ملحوظة: الإذن الممنوح لوحده مش كافي — أندرويد بيدّي استثناء بدء
+        // الأنشطة من الخلفية بس لو فيه overlay view مرسومة فعليًا على
+        // الشاشة دلوقتي، مش لمجرد إن الإذن مفعّل. لو الأوفر اتقفلت أو
+        // فشلت (زي ما بيحصل على بعض أجهزة Samsung)، startActivity() جوّه
+        // هترفض بصمت تام من النظام من غير أي استثناء. حماية إضافية موجودة
+        // في CampaignForegroundService (بيوقف الحملة فورًا لو الأوفر فشلت
+        // ترسم نفسها من الأساس)، لكن الفحص هنا بيغطي حالة إن الأوفر
+        // اتقفلت لاحقًا (مثلاً المستخدم لغى الإذن يدويًا وسط الحملة).
         if (!hasOverlayPermission()) {
-            Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted — call launch from background may be blocked by the OS");
+            Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted — call launch from background will likely be silently blocked");
         }
 
         currentAttempt++;

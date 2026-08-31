@@ -76,6 +76,21 @@ public class CampaignForegroundService extends Service {
         }
     };
 
+    // لو الأوفر فشلت ترسم نفسها فعليًا (إذن اتلغى، أو قيد OEM)، النظام
+    // هيرفض بدء المكالمات من الخلفية بصمت تام لأي رقم جاي. بدل ما
+    // نسيب الحملة "شغالة" اسميًا من غير أي رنين خالص، بنوقفها فورًا
+    // ونوضح السبب للمستخدم.
+    private final BroadcastReceiver bubbleFailedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.e(TAG, "Overlay bubble failed to render — stopping campaign, background calls would be silently blocked");
+            mainHandler.post(() -> Toast.makeText(getApplicationContext(),
+                    "تعذّر عرض الفقاعة العائمة، فتم إيقاف الحملة. تأكد من تفعيل إذن \"الظهور فوق التطبيقات الأخرى\" وحاول تاني.",
+                    Toast.LENGTH_LONG).show());
+            stopCampaign();
+        }
+    };
+
     // بيستقبل تغييرات أقصى عدد محاولات / التأخير من الـ overlay panel
     // وقت ما فيه رقم شغال دلوقتي، وبيحدّث الـ AutoRedialManager الحالي
     // فورًا بدل ما التغيير يأثر بس على الأرقام الجاية.
@@ -105,6 +120,9 @@ public class CampaignForegroundService extends Service {
         );
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 liveSettingsReceiver, new IntentFilter(OverlayBubbleService.ACTION_LIVE_SETTINGS_CHANGED)
+        );
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                bubbleFailedReceiver, new IntentFilter(OverlayBubbleService.ACTION_BUBBLE_FAILED)
         );
 
         telephonyListener = new TelephonyCallStateListener(this);
@@ -484,5 +502,6 @@ public class CampaignForegroundService extends Service {
         executor.shutdownNow();
         try { LocalBroadcastManager.getInstance(this).unregisterReceiver(stopReceiver); } catch (Exception ignored) {}
         try { LocalBroadcastManager.getInstance(this).unregisterReceiver(liveSettingsReceiver); } catch (Exception ignored) {}
+        try { LocalBroadcastManager.getInstance(this).unregisterReceiver(bubbleFailedReceiver); } catch (Exception ignored) {}
     }
 }

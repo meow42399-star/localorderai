@@ -51,6 +51,15 @@ public class OverlayBubbleService extends Service {
     public static final String EXTRA_MAX_ATTEMPTS = "extra_max_attempts";
     public static final String EXTRA_DELAY_SECONDS = "extra_delay_seconds";
 
+    /**
+     * بتتبعت لما الأوفر تفشل ترسم نفسها فعليًا (إذن ملغي، أو قيد خاص
+     * بجهاز Samsung/OEM معين). CampaignForegroundService بيسمعها
+     * ويوقف الحملة فورًا بدل ما يكمل ويحاول يفتح مكالمات هيترفضها
+     * النظام بصمت — لأن استثناء بدء الأنشطة من الخلفية بيعتمد على
+     * وجود overlay view فعلي على الشاشة، مش بس على الإذن الممنوح.
+     */
+    public static final String ACTION_BUBBLE_FAILED = "com.localorderai.BUBBLE_FAILED";
+
     private void broadcastLiveSettingsChanged(Integer maxAttempts, Integer delaySeconds) {
         Intent b = new Intent(ACTION_LIVE_SETTINGS_CHANGED);
         if (maxAttempts != null) b.putExtra(EXTRA_MAX_ATTEMPTS, (int) maxAttempts);
@@ -100,6 +109,9 @@ public class OverlayBubbleService extends Service {
             addBubble();
         } catch (Exception e) {
             Log.e(TAG, "Failed to add overlay bubble", e);
+            try {
+                LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent(ACTION_BUBBLE_FAILED));
+            } catch (Exception ignored) {}
             stopSelf();
             return;
         }
@@ -140,6 +152,16 @@ public class OverlayBubbleService extends Service {
     // ---------- Bubble ----------
 
     private void addBubble() {
+        // فحص صريح للإذن قبل أي محاولة رسم — الفحص في DashboardFragment
+        // بيحصل وقت الضغط على "بدء الحملة"، لكن ممكن يمر وقت (تأخير
+        // النظام، أو المستخدم يلغي الإذن بعد الضغط مباشرة) قبل ما
+        // onCreate() هنا يتنفذ فعليًا. من غير الفحص المباشر ده،
+        // windowManager.addView() كان بيرمي SecurityException بصمت
+        // وتقفل الخدمة كلها من غير أي رسالة توصل للمستخدم.
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            throw new SecurityException("SYSTEM_ALERT_WINDOW permission not granted or revoked");
+        }
+
         LayoutInflater inflater = LayoutInflater.from(this);
         bubbleView = inflater.inflate(R.layout.overlay_bubble, null);
         tvBubbleCounter = bubbleView.findViewById(R.id.tvBubbleCounter);

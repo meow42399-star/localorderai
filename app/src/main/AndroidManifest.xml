@@ -2,89 +2,72 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.CALL_PHONE" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
-    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.CALL" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.DIAL" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
-        android:name=".LocalOrderAiApp"
-        android:label="LocalOrderAI PRO"
-        android:icon="@mipmap/ic_launcher"
+        android:label="LocalOrderAI"
+        android:icon="@android:drawable/sym_action_call"
         android:allowBackup="false"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LocalOrderAI">
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
 
         <activity
-            android:name=".ui.MainActivity"
-            android:exported="true">
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- شروط أندرويد عشان التطبيق يتأهل لدور Default Dialer -->
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
         </activity>
 
         <activity
-            android:name=".ui.AutoCallLauncherActivity"
+            android:name=".CallActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:launchMode="singleInstance"
-            android:excludeFromRecents="true"
-            android:noHistory="true" />
-
-        <!--
-            دلوقتي المشروع فعليًا بيطلب دور Default Dialer (RoleManager.ROLE_DIALER)
-            عشان يقدر يبدأ أنشطة من الخلفية (بدل استغلال SYSTEM_ALERT_WINDOW اللي كان
-            بيفشل صامت لو الأوفر مش ظاهرة) ويتحكم في السماعة بشكل موثوق (setSpeakerphoneOn
-            بيتجاهله النظام غالبًا لغير Default Dialer). المنطق الفعلي لمتابعة حالة
-            المكالمة (رن/رد/انتهاء) لسه عن طريق TelephonyManager.listen() زي الأول —
-            نفس الطريقة اللي تطبيقات auto-dialer تجارية بتستخدمها فعليًا، مش InCallService
-            نفسها. InCallServiceImpl هنا مجرد Service فاضية تقريبًا، دورها الوحيد إنها
-            تسجّل عند النظام إن التطبيق فعلاً بيقدر يبقى Default Dialer.
-        -->
-        <service
-            android:name=".services.CampaignForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="phoneCall" />
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
         <service
-            android:name=".services.InCallServiceImpl"
-            android:permission="android.permission.BIND_INCALL_SERVICE"
-            android:exported="false">
+            android:name=".DialerInCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_UI"
+                android:value="true" />
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+                android:value="false" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
             </intent-filter>
         </service>
 
         <service
-            android:name=".services.OverlayBubbleService"
-            android:exported="false" />
-
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="com.localorderai.fileprovider"
+            android:name=".QueueService"
             android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
+            android:foregroundServiceType="phoneCall" />
 
     </application>
 </manifest>

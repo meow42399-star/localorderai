@@ -1,10 +1,11 @@
 name: Build and Release APK
 
-# بيشتغل تلقائيًا لما تعمل push لأي tag يبدأ بـ v (زي v1.1.0)
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,38 +24,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      # بياخد رقم النسخة من اسم الـ tag نفسه (v1.1.0 -> 1.1.0)
-      # ويحطه في versionName أوتوماتيك، عشان متنساش تحدثه يدوي
-      - name: Extract version from tag
+      - name: Compute version
         id: version
         run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          VERSION_NAME="${TAG_NAME#v}"
-          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Set versionName in build.gradle
-        run: |
-          sed -i "s/versionName \".*\"/versionName \"${{ steps.version.outputs.version_name }}\"/" app/build.gradle
-          cat app/build.gradle | grep versionName
+          echo "version_name=2.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version_code=$((1000 + ${{ github.run_number }}))" >> "$GITHUB_OUTPUT"
 
       - name: Build release APK
-        run: ./gradlew assembleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PappVersionName=${{ steps.version.outputs.version_name }} \
+            -PappVersionCode=${{ steps.version.outputs.version_code }}
 
-      # لو عندك keystore حقيقي للتوقيع، الخطوة دي هتوقّع الـ APK.
-      # من غير ما تضيف السيكريتس دول، الـ APK هيتبني unsigned
-      # (يشتغل للتجربة بس مش نظيف للتوزيع الرسمي).
-      - name: Sign APK
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
+      - name: Sign APK with the permanent key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "KEYSTORE_BASE64 secret is missing - refusing to publish an APK with a different signature"
+            exit 1
+          fi
           echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" -type f | sort -V | tail -1)
           "$APKSIGNER" sign \
@@ -64,23 +57,17 @@ jobs:
             --key-pass pass:"$KEY_PASSWORD" \
             --out app/build/outputs/apk/release/app-release-signed.apk \
             app/build/outputs/apk/release/app-release-unsigned.apk
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release-signed.apk | grep -i "SHA-256"
+          rm -f release.keystore
 
-      - name: Locate final APK
-        id: apk
-        run: |
-          if [ -f app/build/outputs/apk/release/app-release-signed.apk ]; then
-            echo "path=app/build/outputs/apk/release/app-release-signed.apk" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=app/build/outputs/apk/release/app-release-unsigned.apk" >> "$GITHUB_OUTPUT"
-          fi
-
-      # بينشر الـ Release ويرفق الـ APK كـ asset تلقائيًا
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag_name }}
+          tag_name: v${{ steps.version.outputs.version_name }}
+          target_commitish: ${{ github.sha }}
           name: "Version ${{ steps.version.outputs.version_name }}"
-          files: ${{ steps.apk.outputs.path }}
+          files: app/build/outputs/apk/release/app-release-signed.apk
           generate_release_notes: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

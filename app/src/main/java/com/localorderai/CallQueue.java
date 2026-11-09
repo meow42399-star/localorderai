@@ -89,8 +89,9 @@ public final class CallQueue {
         @Override
         public void run() {
             if (app == null) return;
-            if (autoSpeaker) AudioControl.setSpeaker(app, true);
-            if (autoMute) AudioControl.setMuted(app, true);
+            // بنتحقق من الحالة الأول (ensure*) فالتكرار آمن ومش بيقلب المكبر/الميوت
+            if (autoSpeaker) AudioControl.ensureSpeaker(app, true);
+            if (autoMute) AudioControl.ensureMuted(app, true);
             if (basicMode && autoSpeaker) SpeakerAccessibilityService.nudge();
         }
     };

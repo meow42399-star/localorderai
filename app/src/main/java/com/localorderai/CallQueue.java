@@ -91,6 +91,7 @@ public final class CallQueue {
             if (app == null) return;
             if (autoSpeaker) AudioControl.setSpeaker(app, true);
             if (autoMute) AudioControl.setMuted(app, true);
+            if (basicMode && autoSpeaker) SpeakerAccessibilityService.nudge();
         }
     };
 
@@ -298,6 +299,7 @@ public final class CallQueue {
             stopWatcher();
             inCall = false;
         }
+        SpeakerAccessibilityService.endCall();
         if (app != null && (autoSpeaker || autoMute)) AudioControl.reset(app);
         if (app != null) {
             app.stopService(new Intent(app, QueueService.class));
@@ -350,6 +352,7 @@ public final class CallQueue {
                 inCall = true;
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
+                SpeakerAccessibilityService.beginCall(autoSpeaker);
                 // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
                 scheduleAudio(300, 1000, 2000, 3500, 5000, 7000, 10000);
             }
@@ -358,6 +361,7 @@ public final class CallQueue {
                 inCall = false;
                 long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
                 handler.removeCallbacks(audioRunnable);
+                SpeakerAccessibilityService.endCall();
                 record("انتهت — المدة " + secs + " ثانية");
                 if (app != null) AudioControl.reset(app);
                 scheduleNext();

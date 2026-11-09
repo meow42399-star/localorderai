@@ -4,12 +4,16 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
 import android.telecom.DisconnectCause;
 import android.telecom.TelecomManager;
+import android.telephony.PhoneStateListener;
+import android.telephony.TelephonyManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +50,12 @@ public final class CallQueue {
     private int ringTimeoutSec = 45;
     private boolean autoSpeaker = true;
 
+    // الوضع البسيط (من غير Default Dialer)
+    private boolean basicMode;
+    private boolean inCall;
+    private long callStartMs;
+    private Object watcher;
+
     private final Runnable nextRunnable = new Runnable() {
         @Override
         public void run() {
@@ -70,6 +80,13 @@ public final class CallQueue {
                 timedOut = true;
                 currentCall.disconnect();
             }
+        }
+    };
+
+    private final Runnable speakerOnRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (app != null) AudioControl.setSpeaker(app, true);
         }
     };
 
@@ -116,7 +133,7 @@ public final class CallQueue {
         return new ArrayList<>(results);
     }
 
-    public void start(Context ctx, List<String> nums, int ringSec, boolean speaker) {
+    public void start(Context ctx, List<String> nums, int ringSec, boolean speaker, boolean basic) {
         if (running) return;
         app = ctx.getApplicationContext();
         numbers.clear();
@@ -125,7 +142,10 @@ public final class CallQueue {
         index = -1;
         ringTimeoutSec = Math.max(10, ringSec);
         autoSpeaker = speaker;
+        basicMode = basic;
+        inCall = false;
         running = true;
+        if (basicMode) startWatcher();
         next();
     }
 
@@ -134,7 +154,14 @@ public final class CallQueue {
         running = false;
         handler.removeCallbacks(nextRunnable);
         handler.removeCallbacks(noCallRunnable);
-        if (currentCall != null) {
+        if (basicMode) {
+            if (inCall) {
+                inCall = false;
+                record("اتقفلت (إيقاف الطابور)");
+            }
+            endCallQuietly();
+            finish();
+        } else if (currentCall != null) {
             currentCall.disconnect();
         } else {
             DialerInCallService s = DialerInCallService.instance;
@@ -262,9 +289,87 @@ public final class CallQueue {
         handler.removeCallbacks(nextRunnable);
         handler.removeCallbacks(noCallRunnable);
         handler.removeCallbacks(ringTimeoutRunnable);
+        handler.removeCallbacks(speakerOnRunnable);
+        if (basicMode) {
+            stopWatcher();
+            inCall = false;
+            if (app != null) AudioControl.reset(app);
+        }
         if (app != null) {
             app.stopService(new Intent(app, QueueService.class));
         }
         notifyChanged();
+    }
+
+    // ---------------- الوضع البسيط ----------------
+
+    private void startWatcher() {
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                watcher = StateCallback31.register(app, this);
+            } else {
+                TelephonyManager tm = (TelephonyManager) app.getSystemService(Context.TELEPHONY_SERVICE);
+                PhoneStateListener l = new PhoneStateListener() {
+                    @Override
+                    public void onCallStateChanged(int state, String number) {
+                        onPhoneState(state);
+                    }
+                };
+                tm.listen(l, PhoneStateListener.LISTEN_CALL_STATE);
+                watcher = l;
+            }
+        } catch (SecurityException e) {
+            watcher = null;
+        }
+    }
+
+    private void stopWatcher() {
+        if (watcher == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                StateCallback31.unregister(app, watcher);
+            } else {
+                TelephonyManager tm = (TelephonyManager) app.getSystemService(Context.TELEPHONY_SERVICE);
+                tm.listen((PhoneStateListener) watcher, PhoneStateListener.LISTEN_NONE);
+            }
+        } catch (Exception ignored) {
+        }
+        watcher = null;
+    }
+
+    void onPhoneState(int state) {
+        if (!running || !basicMode) return;
+        if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
+            if (waitingForCall) {
+                waitingForCall = false;
+                handler.removeCallbacks(noCallRunnable);
+                inCall = true;
+                callStartMs = SystemClock.elapsedRealtime();
+                notifyChanged();
+                if (autoSpeaker) {
+                    // الصوت بيتظبط لما المكالمة تتوصّل، فبنحاول كذا مرة
+                    handler.postDelayed(speakerOnRunnable, 800);
+                    handler.postDelayed(speakerOnRunnable, 3000);
+                    handler.postDelayed(speakerOnRunnable, 7000);
+                }
+            }
+        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
+            if (inCall) {
+                inCall = false;
+                long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
+                handler.removeCallbacks(speakerOnRunnable);
+                record("انتهت — المدة " + secs + " ثانية");
+                if (app != null) AudioControl.reset(app);
+                scheduleNext();
+            }
+        }
+    }
+
+    private void endCallQuietly() {
+        try {
+            TelecomManager tm = (TelecomManager) app.getSystemService(Context.TELECOM_SERVICE);
+            tm.endCall();
+        } catch (SecurityException ignored) {
+        }
     }
 }

@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
         root.addView(ringEdit);
 
         roleBtn = new Button(this);
-        roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي");
+        roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
         root.addView(roleBtn);
         startBtn = new Button(this);
         startBtn.setText("ابدأ");
@@ -162,8 +162,9 @@ public class MainActivity extends Activity {
         List<String> missing = new ArrayList<>();
         String[] needed = Build.VERSION.SDK_INT >= 33
                 ? new String[]{Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.POST_NOTIFICATIONS}
-                : new String[]{Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE};
+                Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.POST_NOTIFICATIONS}
+                : new String[]{Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE,
+                Manifest.permission.ANSWER_PHONE_CALLS};
         for (String p : needed) {
             if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) missing.add(p);
         }
@@ -191,11 +192,6 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "اكتب رقم واحد على الأقل", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (!hasDialerRole()) {
-            Toast.makeText(this, "فعّل التطبيق كتطبيق اتصال افتراضي الأول", Toast.LENGTH_LONG).show();
-            requestDialerRole();
-            return;
-        }
         int ring = 45;
         try {
             ring = Integer.parseInt(ringEdit.getText().toString().trim());
@@ -210,7 +206,7 @@ public class MainActivity extends Activity {
             startForegroundService(new Intent(this, QueueService.class));
         } catch (Exception ignored) {
         }
-        CallQueue.get().start(this, nums, ring, speakerCheck.isChecked());
+        CallQueue.get().start(this, nums, ring, speakerCheck.isChecked(), !hasDialerRole());
     }
 
     /** بيحوّل الأرقام العربية لإنجليزي ويشيل المسافات والشرطات وأي حروف. */
@@ -235,7 +231,9 @@ public class MainActivity extends Activity {
     private void render() {
         CallQueue q = CallQueue.get();
         StringBuilder st = new StringBuilder();
-        st.append(hasDialerRole() ? "✔ مفعّل كتطبيق اتصال افتراضي" : "✘ مش مفعّل كتطبيق اتصال افتراضي");
+        st.append(hasDialerRole()
+                ? "الوضع الكامل: التطبيق هو الاتصال الافتراضي (بيعرف مين قفل + مكبر مضمون)"
+                : "الوضع البسيط: المكبر بيشتغل حسب نوع الموبايل ومش بيعرف مين قفل");
         if (q.isRunning()) {
             st.append("\nشغال: رقم ").append(q.getCurrentPosition()).append(" من ").append(q.getTotal());
         }

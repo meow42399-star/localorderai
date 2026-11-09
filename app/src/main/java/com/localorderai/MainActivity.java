@@ -31,7 +31,9 @@ public class MainActivity extends Activity {
     private EditText numbersEdit, ringEdit;
     private CheckBox speakerCheck;
     private TextView statusView, resultsView;
-    private Button roleBtn, startBtn, stopBtn;
+    private Button roleBtn, startBtn, stopBtn, updateBtn;
+    private TextView updateStatus;
+    private UpdateManager updater;
     private SharedPreferences prefs;
 
     private final CallQueue.Listener queueListener = new CallQueue.Listener() {
@@ -100,6 +102,24 @@ public class MainActivity extends Activity {
         version.setPadding(0, 40, 0, 0);
         root.addView(version);
 
+        updateBtn = new Button(this);
+        updateBtn.setText("تحقق من التحديثات");
+        root.addView(updateBtn);
+        updateStatus = new TextView(this);
+        root.addView(updateStatus);
+        updater = new UpdateManager(this, new UpdateManager.Status() {
+            @Override
+            public void set(String text) {
+                updateStatus.setText(text);
+            }
+        });
+        updateBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                updater.checkAndUpdate();
+            }
+        });
+
         setContentView(scroll);
 
         roleBtn.setOnClickListener(new View.OnClickListener() {
@@ -121,7 +141,12 @@ public class MainActivity extends Activity {
             }
         });
 
-        UpdateChecker.check(this);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (updater != null) updater.cancel();
+        super.onDestroy();
     }
 
     @Override

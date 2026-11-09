@@ -49,6 +49,7 @@ public final class CallQueue {
     private Call currentCall;
     private int ringTimeoutSec = 45;
     private boolean autoSpeaker = true;
+    private boolean autoMute = false;
 
     // الوضع البسيط (من غير Default Dialer)
     private boolean basicMode;
@@ -83,12 +84,20 @@ public final class CallQueue {
         }
     };
 
-    private final Runnable speakerOnRunnable = new Runnable() {
+    /** بيطبّق إعدادات المكبر والميوت اللي اختارها المستخدم قبل البدء. */
+    private final Runnable audioRunnable = new Runnable() {
         @Override
         public void run() {
-            if (app != null) AudioControl.setSpeaker(app, true);
+            if (app == null) return;
+            if (autoSpeaker) AudioControl.setSpeaker(app, true);
+            if (autoMute) AudioControl.setMuted(app, true);
         }
     };
+
+    private void scheduleAudio(long... delaysMs) {
+        if (!autoSpeaker && !autoMute) return;
+        for (long d : delaysMs) handler.postDelayed(audioRunnable, d);
+    }
 
     private final Call.Callback callback = new Call.Callback() {
         @Override
@@ -133,7 +142,7 @@ public final class CallQueue {
         return new ArrayList<>(results);
     }
 
-    public void start(Context ctx, List<String> nums, int ringSec, boolean speaker, boolean basic) {
+    public void start(Context ctx, List<String> nums, int ringSec, boolean speaker, boolean mute, boolean basic) {
         if (running) return;
         app = ctx.getApplicationContext();
         numbers.clear();
@@ -142,6 +151,7 @@ public final class CallQueue {
         index = -1;
         ringTimeoutSec = Math.max(10, ringSec);
         autoSpeaker = speaker;
+        autoMute = mute;
         basicMode = basic;
         inCall = false;
         running = true;
@@ -185,6 +195,8 @@ public final class CallQueue {
         timedOut = false;
         waitingForCall = true;
         notifyChanged();
+        // تطبيق المكبر/الميوت قبل الاتصال (زي الإعداد المسبق)
+        audioRunnable.run();
         try {
             TelecomManager tm = (TelecomManager) app.getSystemService(Context.TELECOM_SERVICE);
             tm.placeCall(Uri.fromParts("tel", n, null), new Bundle());
@@ -219,15 +231,7 @@ public final class CallQueue {
         answered = true;
         handler.removeCallbacks(ringTimeoutRunnable);
         notifyChanged();
-        if (autoSpeaker) {
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    DialerInCallService s = DialerInCallService.instance;
-                    if (s != null) s.setAudioRoute(CallAudioState.ROUTE_SPEAKER);
-                }
-            }, 400);
-        }
+        scheduleAudio(300, 1000, 2500);
     }
 
     private void onDisconnected(Call call) {
@@ -289,12 +293,12 @@ public final class CallQueue {
         handler.removeCallbacks(nextRunnable);
         handler.removeCallbacks(noCallRunnable);
         handler.removeCallbacks(ringTimeoutRunnable);
-        handler.removeCallbacks(speakerOnRunnable);
+        handler.removeCallbacks(audioRunnable);
         if (basicMode) {
             stopWatcher();
             inCall = false;
-            if (app != null) AudioControl.reset(app);
         }
+        if (app != null && (autoSpeaker || autoMute)) AudioControl.reset(app);
         if (app != null) {
             app.stopService(new Intent(app, QueueService.class));
         }
@@ -346,18 +350,14 @@ public final class CallQueue {
                 inCall = true;
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
-                if (autoSpeaker) {
-                    // الصوت بيتظبط لما المكالمة تتوصّل، فبنحاول كذا مرة
-                    handler.postDelayed(speakerOnRunnable, 800);
-                    handler.postDelayed(speakerOnRunnable, 3000);
-                    handler.postDelayed(speakerOnRunnable, 7000);
-                }
+                // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
+                scheduleAudio(300, 1000, 2000, 3500, 5000, 7000, 10000);
             }
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {
             if (inCall) {
                 inCall = false;
                 long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
-                handler.removeCallbacks(speakerOnRunnable);
+                handler.removeCallbacks(audioRunnable);
                 record("انتهت — المدة " + secs + " ثانية");
                 if (app != null) AudioControl.reset(app);
                 scheduleNext();

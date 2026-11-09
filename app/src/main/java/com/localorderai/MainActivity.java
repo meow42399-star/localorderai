@@ -29,7 +29,7 @@ public class MainActivity extends Activity {
     private static final int REQ_ROLE = 2;
 
     private EditText numbersEdit, ringEdit;
-    private CheckBox speakerCheck;
+    private CheckBox speakerCheck, muteCheck;
     private TextView statusView, resultsView;
     private Button roleBtn, startBtn, stopBtn, updateBtn;
     private TextView updateStatus;
@@ -71,6 +71,37 @@ public class MainActivity extends Activity {
         speakerCheck.setText("شغّل المكبر تلقائياً أول ما المكالمة ترد");
         speakerCheck.setChecked(prefs.getBoolean("speaker", true));
         root.addView(speakerCheck);
+
+        muteCheck = new CheckBox(this);
+        muteCheck.setText("اقفل الميكروفون (ميوت) تلقائياً");
+        muteCheck.setChecked(prefs.getBoolean("mute", false));
+        root.addView(muteCheck);
+
+        LinearLayout liveRow = new LinearLayout(this);
+        liveRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button liveSpeaker = new Button(this);
+        liveSpeaker.setText("المكبر الآن: تشغيل/إيقاف");
+        Button liveMute = new Button(this);
+        liveMute.setText("الميوت الآن: تشغيل/إيقاف");
+        liveRow.addView(liveSpeaker, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        liveRow.addView(liveMute, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(liveRow);
+        liveSpeaker.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean on = !AudioControl.isSpeakerOn(MainActivity.this);
+                AudioControl.setSpeaker(MainActivity.this, on);
+                Toast.makeText(MainActivity.this, on ? "المكبر شغال" : "المكبر مقفول", Toast.LENGTH_SHORT).show();
+            }
+        });
+        liveMute.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean on = !AudioControl.isMuted(MainActivity.this);
+                AudioControl.setMuted(MainActivity.this, on);
+                Toast.makeText(MainActivity.this, on ? "الميوت شغال" : "الميوت مقفول", Toast.LENGTH_SHORT).show();
+            }
+        });
 
         TextView ringLabel = new TextView(this);
         ringLabel.setText("أقصى مدة رنين (ثواني) قبل الانتقال للرقم التالي:");
@@ -225,13 +256,14 @@ public class MainActivity extends Activity {
         prefs.edit()
                 .putString("numbers", numbersEdit.getText().toString())
                 .putBoolean("speaker", speakerCheck.isChecked())
+                .putBoolean("mute", muteCheck.isChecked())
                 .putInt("ring", ring)
                 .apply();
         try {
             startForegroundService(new Intent(this, QueueService.class));
         } catch (Exception ignored) {
         }
-        CallQueue.get().start(this, nums, ring, speakerCheck.isChecked(), !hasDialerRole());
+        CallQueue.get().start(this, nums, ring, speakerCheck.isChecked(), muteCheck.isChecked(), !hasDialerRole());
     }
 
     /** بيحوّل الأرقام العربية لإنجليزي ويشيل المسافات والشرطات وأي حروف. */

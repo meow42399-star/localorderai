@@ -77,6 +77,7 @@ final class AudioControl {
     /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
         userSpeakerOff = !on;
+        SpeakerAccessibilityService.endCall(); // المستخدم قرر: خدمة الإتاحة ما تدوسش على الزر تاني
         applySpeaker(c, on);
     }
 
@@ -123,6 +124,26 @@ final class AudioControl {
         }
     }
 
+    /** هل المكبر شغال فعلاً دلوقتي (من AudioManager بس)؟ */
+    @SuppressWarnings("deprecation")
+    private static boolean speakerActive(AudioManager a) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                AudioDeviceInfo d = a.getCommunicationDevice();
+                if (d != null) return d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+            } catch (Exception ignored) {
+            }
+        }
+        return a.isSpeakerphoneOn();
+    }
+
+    /**
+     * قفل المكبر بنفس أسلوب التطبيق المرجعي: يظبط وضع الصوت الأول (IN_CALL) وبعدين setSpeakerphoneOn(false)،
+     * ويتحقق، ولو لسه شغال يجرّب الوضع اللي بعده، وفي الآخر يرجّع MODE_NORMAL.
+     * على أندرويد 12+ بيبدأ بـ clearCommunicationDevice ولو المكبر فضل شغال بيحدد سماعة الأذن صراحةً.
+     * ملحوظة: لو سماعة بلوتوث شغالة ما بنغيّرش وضع الصوت (زي المرجع).
+     */
+    @SuppressWarnings("deprecation")
     private static void speakerOffViaAudioManager(AudioManager a) {
         if (Build.VERSION.SDK_INT >= 31) {
             try {
@@ -130,8 +151,38 @@ final class AudioControl {
             } catch (Exception ignored) {
             }
         }
+        boolean bt = a.isBluetoothScoOn();
+        if (!bt) {
+            int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
+            for (int mode : ladder) {
+                setModeTracked(a, mode);
+                try {
+                    a.setSpeakerphoneOn(false);
+                } catch (Exception ignored) {
+                }
+                if (!speakerActive(a)) break;
+            }
+        } else {
+            try {
+                a.setSpeakerphoneOn(false);
+            } catch (Exception ignored) {
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 31 && speakerActive(a)) {
+            routeToEarpiece(a);
+        }
+        if (!bt) setModeTracked(a, AudioManager.MODE_NORMAL);
+    }
+
+    /** أندرويد 12+: لو clearCommunicationDevice ما نفعش، نحدد سماعة الأذن صراحةً. */
+    private static void routeToEarpiece(AudioManager a) {
         try {
-            a.setSpeakerphoneOn(false);
+            for (AudioDeviceInfo d : a.getAvailableCommunicationDevices()) {
+                if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                    a.setCommunicationDevice(d);
+                    return;
+                }
+            }
         } catch (Exception ignored) {
         }
     }

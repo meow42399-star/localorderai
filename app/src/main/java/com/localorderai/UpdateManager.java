@@ -1,12 +1,7 @@
 package com.localorderai;
 
 import android.app.Activity;
-import android.app.DownloadManager;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Settings;
 
@@ -17,6 +12,9 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -36,8 +34,8 @@ final class UpdateManager {
 
     private final Activity act;
     private final Status status;
-    private long downloadId = -1;
-    private BroadcastReceiver receiver;
+    private volatile boolean cancelled;
+    private volatile boolean downloading;
     private File apk;
 
     UpdateManager(Activity act, Status status) {
@@ -108,45 +106,128 @@ final class UpdateManager {
                     Uri.parse("package:" + act.getPackageName())));
             return;
         }
-        apk = new File(act.getExternalFilesDir(null), "update-" + ver + ".apk");
-        if (apk.exists()) apk.delete();
+        if (downloading) return; // تحميل شغال بالفعل
+        File dir = act.getExternalFilesDir(null);
+        if (dir == null) dir = act.getFilesDir();
+        apk = new File(dir, "update-" + ver + ".apk");
+        final File part = new File(dir, "update-" + ver + ".apk.part");
+        final File target = apk;
+        if (target.exists()) target.delete();
+        if (part.exists()) part.delete();
+        cancelled = false;
+        downloading = true;
+        status.set("فيه نسخة جديدة " + ver + " — بيبدأ التحميل...");
 
-        final DownloadManager dm = (DownloadManager) act.getSystemService(Context.DOWNLOAD_SERVICE);
-        DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url))
-                .setTitle("تحديث LocalOrderAI")
-                .setDescription("جاري تحميل النسخة " + ver)
-                .setMimeType("application/vnd.android.package-archive")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(act, null, apk.getName());
-        downloadId = dm.enqueue(req);
-
-        cancel();
-        receiver = new BroadcastReceiver() {
+        new Thread(new Runnable() {
             @Override
-            public void onReceive(Context ctx, Intent intent) {
-                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-                if (id != downloadId) return;
-                boolean ok = false;
-                Cursor cur = dm.query(new DownloadManager.Query().setFilterById(id));
-                if (cur != null) {
-                    if (cur.moveToFirst()) {
-                        int st = cur.getInt(cur.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                        ok = st == DownloadManager.STATUS_SUCCESSFUL;
+            public void run() {
+                HttpURLConnection c = null;
+                try {
+                    c = open(url);
+                    int code = c.getResponseCode();
+                    if (code != 200) {
+                        post("فشل التحميل (HTTP " + code + "). جرّب تاني.");
+                        return;
                     }
-                    cur.close();
-                }
-                cancel();
-                if (ok) {
-                    status.set("تم التحميل. اضغط تثبيت.");
-                    install();
-                } else {
-                    status.set("فشل التحميل. جرّب تاني.");
+                    long total = c.getContentLength();
+                    InputStream in = c.getInputStream();
+                    OutputStream out = new FileOutputStream(part);
+                    byte[] buf = new byte[16 * 1024];
+                    long done = 0;
+                    long lastUi = 0;
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        if (cancelled) {
+                            out.close();
+                            in.close();
+                            part.delete();
+                            return;
+                        }
+                        out.write(buf, 0, n);
+                        done += n;
+                        long now = System.currentTimeMillis();
+                        if (now - lastUi > 300) {
+                            lastUi = now;
+                            post("بينزّل النسخة " + ver + " — " + progress(done, total));
+                        }
+                    }
+                    out.flush();
+                    out.close();
+                    in.close();
+                    if (total > 0 && done != total) {
+                        part.delete();
+                        post("التحميل ما كملش (" + progress(done, total) + "). جرّب تاني.");
+                        return;
+                    }
+                    if (!looksLikeApk(part) || !part.renameTo(target)) {
+                        part.delete();
+                        post("الملف المحمّل مش APK سليم. جرّب تاني.");
+                        return;
+                    }
+                    act.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            status.set("تم التحميل. اضغط تثبيت.");
+                            install();
+                        }
+                    });
+                } catch (Exception e) {
+                    part.delete();
+                    post("فشل التحميل: " + e.getClass().getSimpleName()
+                            + (e.getMessage() != null ? " - " + e.getMessage() : ""));
+                } finally {
+                    downloading = false;
+                    if (c != null) c.disconnect();
                 }
             }
-        };
-        act.registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                Context.RECEIVER_EXPORTED);
-        status.set("فيه نسخة جديدة " + ver + " — بينزّلها دلوقتي...");
+        }).start();
+    }
+
+    /** بيفتح الاتصال ويتبع الـ redirects يدوي (GitHub بيحوّل لـ objects.githubusercontent.com). */
+    private static HttpURLConnection open(String url) throws Exception {
+        String cur = url;
+        for (int i = 0; i < 6; i++) {
+            HttpURLConnection c = (HttpURLConnection) new URL(cur).openConnection();
+            c.setInstanceFollowRedirects(false);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(30000);
+            c.setRequestProperty("User-Agent", "LocalOrderAI-Updater");
+            c.setRequestProperty("Accept", "application/octet-stream");
+            int code = c.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                String loc = c.getHeaderField("Location");
+                c.disconnect();
+                if (loc == null) throw new java.io.IOException("redirect without Location");
+                cur = new URL(new URL(cur), loc).toString();
+                continue;
+            }
+            return c;
+        }
+        throw new java.io.IOException("too many redirects");
+    }
+
+    private static String progress(long done, long total) {
+        if (total > 0) {
+            return (int) (done * 100 / total) + "% (" + mb(done) + " / " + mb(total) + " MB)";
+        }
+        return mb(done) + " MB";
+    }
+
+    private static String mb(long b) {
+        return String.format(java.util.Locale.US, "%.1f", b / 1048576.0);
+    }
+
+    /** ملف APK هو ZIP: لازم يبدأ بـ "PK". */
+    private static boolean looksLikeApk(File f) {
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            int a = in.read();
+            int b = in.read();
+            in.close();
+            return a == 'P' && b == 'K';
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void install() {
@@ -161,15 +242,9 @@ final class UpdateManager {
         }
     }
 
-    /** بيفك الـ receiver (يتنادى من onDestroy). */
+    /** بيوقّف أي تحميل شغال (يتنادى من onDestroy). */
     void cancel() {
-        if (receiver != null) {
-            try {
-                act.unregisterReceiver(receiver);
-            } catch (Exception ignored) {
-            }
-            receiver = null;
-        }
+        cancelled = true;
     }
 
     static boolean isNewer(String remote, String local) {

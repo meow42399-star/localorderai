@@ -74,6 +74,11 @@ final class AudioControl {
         return a.isSpeakerphoneOn();
     }
 
+    /** المستخدم قفل المكبر بإيده في المكالمة دي؟ */
+    static boolean isUserSpeakerOff() {
+        return userSpeakerOff;
+    }
+
     /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
         userSpeakerOff = !on;

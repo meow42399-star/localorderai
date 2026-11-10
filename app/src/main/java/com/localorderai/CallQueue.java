@@ -90,14 +90,25 @@ public final class CallQueue {
         public void run() {
             if (app == null) return;
             // بنتحقق من الحالة الأول (ensure*) فالتكرار آمن ومش بيقلب المكبر/الميوت
-            if (autoSpeaker) AudioControl.ensureSpeaker(app, true);
+            if (autoSpeaker) {
+                // AudioManager هو الأساس (زي المرجع)، وخدمة الإتاحة احتياطي بس لو فشل بعد 3 محاولات
+                boolean ok = AudioControl.ensureSpeaker(app, true);
+                if (ok) {
+                    speakerFailCount = 0;
+                    SpeakerAccessibilityService.endCall();
+                } else if (basicMode && !AudioControl.isUserSpeakerOff() && ++speakerFailCount >= 3) {
+                    SpeakerAccessibilityService.fallback();
+                    SpeakerAccessibilityService.nudge();
+                }
+            }
             if (autoMute) AudioControl.ensureMuted(app, true);
-            if (basicMode && autoSpeaker) SpeakerAccessibilityService.nudge();
         }
     };
 
     /** عدد مرات إعادة التفعيل المسموحة لما النظام يغيّر المسار (حماية من حلقة تنازع مع النظام). */
     private int routeRetriesLeft;
+    /** عدد مرات فشل AudioManager في تشغيل المكبر في المكالمة الحالية. */
+    private int speakerFailCount;
 
     private final Runnable routeLostRunnable = new Runnable() {
         @Override
@@ -376,7 +387,8 @@ public final class CallQueue {
                 inCall = true;
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
-                SpeakerAccessibilityService.beginCall(autoSpeaker);
+                speakerFailCount = 0;
+                SpeakerAccessibilityService.beginCall(false); // مش هتدوس إلا كاحتياطي
                 // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
                 scheduleAudio(300, 1000, 2000, 3500, 5000, 7000, 10000);
                 startRouteWatch();

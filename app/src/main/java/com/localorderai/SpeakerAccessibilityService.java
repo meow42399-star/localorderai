@@ -44,6 +44,16 @@ public class SpeakerAccessibilityService extends AccessibilityService {
         active = false;
     }
 
+    /** احتياطي: AudioManager ما نفعش بعد كذا محاولة، فنخلّي الخدمة تدوس على زر شاشة المكالمة. */
+    static void fallback() {
+        if (active) return;
+        want = true;
+        active = true;
+        attempts = 0;
+        lastClickMs = 0;
+        lastInfo = "AudioManager ما نفعش، بدوّر على زر المكبر...";
+    }
+
     static void nudge() {
         SpeakerAccessibilityService s = instance;
         if (s != null && active) s.scan();

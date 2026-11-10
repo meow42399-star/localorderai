@@ -45,6 +45,27 @@ final class AudioControl {
     /** مستمع تغيّر سماعة الاتصال (أندرويد 12+). */
     private static AudioManager.OnCommunicationDeviceChangedListener routeListener;
 
+    /** آخر عملية صوت نفّذناها (للتشخيص). */
+    private static volatile String lastOp = "";
+
+    /** سطر تشخيص بيبيّن الحالة الحقيقية للصوت. */
+    @SuppressWarnings("deprecation")
+    static String diagnose(Context c) {
+        AudioManager a = am(c);
+        StringBuilder b = new StringBuilder("SDK ").append(Build.VERSION.SDK_INT);
+        b.append(" | mode ").append(a.getMode());
+        b.append(" | spk ").append(a.isSpeakerphoneOn());
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                AudioDeviceInfo d = a.getCommunicationDevice();
+                b.append(" | dev ").append(d == null ? "none" : String.valueOf(d.getType()));
+            } catch (Exception ignored) {
+            }
+        }
+        b.append(" | ").append(lastOp);
+        return b.toString();
+    }
+
     private AudioControl() {
     }
 
@@ -105,8 +126,10 @@ final class AudioControl {
     }
 
     private static void speakerOnViaAudioManager(AudioManager a) {
-        if (Build.VERSION.SDK_INT >= 31 && routeToBuiltInSpeaker(a) && a.isSpeakerphoneOn()) {
-            return;
+        if (Build.VERSION.SDK_INT >= 31) {
+            boolean ok = routeToBuiltInSpeaker(a);
+            lastOp = "ON: setCommunicationDevice=" + ok;
+            if (ok) return; // زي المرجع: على 12+ بنكتفي بكده ومنلعبش في وضع الصوت
         }
         for (int mode : SPEAKER_MODE_LADDER) {
             setModeTracked(a, mode);
@@ -114,7 +137,9 @@ final class AudioControl {
                 a.setSpeakerphoneOn(true);
             } catch (Exception ignored) {
             }
-            if (a.isSpeakerphoneOn()) return;
+            boolean on = a.isSpeakerphoneOn();
+            lastOp = "ON: ladder mode=" + mode + " spk=" + on;
+            if (on) return;
         }
     }
 
@@ -140,36 +165,46 @@ final class AudioControl {
     }
 
     /**
-     * قفل المكبر بنفس أسلوب التطبيق المرجعي، لكن بنظبط وضع الصوت (IN_CALL) الأول وبعدين نقفل:
-     * التطبيق اللي بيظبط الوضع هو اللي طلباته بتتنفذ، فلو قفلنا من غير ما نظبطه ممكن النظام يتجاهل الأمر.
-     * بنتحقق بعد كل خطوة، ولو لسه شغال نجرّب الوضع اللي بعده، وفي الآخر نرجّع MODE_NORMAL.
-     * على أندرويد 12+ لو فضل شغال بنحدد سماعة الأذن صراحةً. سماعة بلوتوث شغالة = ما بنغيّرش الوضع.
+     * قفل المكبر زي المرجع بالظبط:
+     *  - أندرويد 12+: clearCommunicationDevice بس (من غير ما نغيّر وضع الصوت). لو فضل شغال نجرّب setSpeakerphoneOn(false)
+     *    وبعدها نحدد سماعة الأذن صراحةً.
+     *  - أندرويد 11 وأقل: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL)، ولو فضل شغال نجرّب IN_COMMUNICATION.
+     *  - سماعة بلوتوث شغالة (SCO): ما بنغيّرش وضع الصوت.
      */
     private static void speakerOffViaAudioManager(AudioManager a) {
-        boolean bt = isBtScoOn(a);
-        if (!bt) {
-            int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
-            for (int mode : ladder) {
-                setModeTracked(a, mode);
-                speakerOffOnce(a);
-                if (!speakerActive(a)) break;
-            }
-        } else {
-            speakerOffOnce(a);
-        }
-        if (Build.VERSION.SDK_INT >= 31 && speakerActive(a)) {
-            routeToEarpiece(a);
-        }
-        if (!bt) setModeTracked(a, AudioManager.MODE_NORMAL);
-    }
-
-    private static void speakerOffOnce(AudioManager a) {
         if (Build.VERSION.SDK_INT >= 31) {
             try {
                 a.clearCommunicationDevice();
             } catch (Exception ignored) {
             }
+            lastOp = "OFF: clearCommunicationDevice";
+            if (!speakerActive(a)) return;
+            try {
+                a.setSpeakerphoneOn(false);
+            } catch (Exception ignored) {
+            }
+            lastOp = "OFF: clear + setSpeakerphoneOn(false)";
+            if (!speakerActive(a)) return;
+            routeToEarpiece(a);
+            lastOp = "OFF: clear + spk(false) + earpiece";
+            return;
         }
+        if (isBtScoOn(a)) {
+            speakerOffOnce(a);
+            lastOp = "OFF: bt, setSpeakerphoneOn(false)";
+            return;
+        }
+        int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
+        for (int mode : ladder) {
+            setModeTracked(a, mode);
+            speakerOffOnce(a);
+            setModeTracked(a, AudioManager.MODE_NORMAL);
+            lastOp = "OFF: ladder mode=" + mode;
+            if (!speakerActive(a)) return;
+        }
+    }
+
+    private static void speakerOffOnce(AudioManager a) {
         try {
             a.setSpeakerphoneOn(false);
         } catch (Exception ignored) {

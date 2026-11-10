@@ -103,7 +103,9 @@ public class MainActivity extends Activity {
                         } else {
                             msg = on ? "المكبر ما اشتغلش" : "المكبر لسه شغال (النظام رفض القفل)";
                         }
-                        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this,
+                                msg + "\n" + AudioControl.diagnose(MainActivity.this),
+                                Toast.LENGTH_LONG).show();
                     }
                 }, 400);
             }

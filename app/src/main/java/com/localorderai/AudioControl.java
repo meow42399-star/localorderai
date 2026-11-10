@@ -66,23 +66,12 @@ final class AudioControl {
             CallAudioState st = s.getCallAudioState();
             return st != null && st.getRoute() == CallAudioState.ROUTE_SPEAKER;
         }
-        AudioManager a = am(c);
-        if (Build.VERSION.SDK_INT >= 31) {
-            AudioDeviceInfo d = a.getCommunicationDevice();
-            if (d != null) return d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
-        }
-        return a.isSpeakerphoneOn();
-    }
-
-    /** المستخدم قفل المكبر بإيده في المكالمة دي؟ */
-    static boolean isUserSpeakerOff() {
-        return userSpeakerOff;
+        return speakerActive(am(c));
     }
 
     /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
         userSpeakerOff = !on;
-        SpeakerAccessibilityService.endCall(); // المستخدم قرر: خدمة الإتاحة ما تدوسش على الزر تاني
         applySpeaker(c, on);
     }
 
@@ -129,54 +118,71 @@ final class AudioControl {
         }
     }
 
-    /** هل المكبر شغال فعلاً دلوقتي (من AudioManager بس)؟ */
+    /**
+     * هل المكبر شغال فعلاً؟ بنعتبره شغال لو أي مؤشر من الاتنين قال كده (setSpeakerphoneOn أو سماعة الاتصال).
+     * قبل كده كنا بنصدّق مؤشر واحد بس، فلو قال "مقفول" غلط، الضغطة اللي المفروض تقفل كانت بتفتح تاني.
+     */
     @SuppressWarnings("deprecation")
     private static boolean speakerActive(AudioManager a) {
+        boolean sp = false;
+        try {
+            sp = a.isSpeakerphoneOn();
+        } catch (Exception ignored) {
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             try {
                 AudioDeviceInfo d = a.getCommunicationDevice();
-                if (d != null) return d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+                if (d != null && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return true;
             } catch (Exception ignored) {
             }
         }
-        return a.isSpeakerphoneOn();
+        return sp;
     }
 
     /**
-     * قفل المكبر بنفس أسلوب التطبيق المرجعي: يظبط وضع الصوت الأول (IN_CALL) وبعدين setSpeakerphoneOn(false)،
-     * ويتحقق، ولو لسه شغال يجرّب الوضع اللي بعده، وفي الآخر يرجّع MODE_NORMAL.
-     * على أندرويد 12+ بيبدأ بـ clearCommunicationDevice ولو المكبر فضل شغال بيحدد سماعة الأذن صراحةً.
-     * ملحوظة: لو سماعة بلوتوث شغالة ما بنغيّرش وضع الصوت (زي المرجع).
+     * قفل المكبر بنفس أسلوب التطبيق المرجعي، لكن بنظبط وضع الصوت (IN_CALL) الأول وبعدين نقفل:
+     * التطبيق اللي بيظبط الوضع هو اللي طلباته بتتنفذ، فلو قفلنا من غير ما نظبطه ممكن النظام يتجاهل الأمر.
+     * بنتحقق بعد كل خطوة، ولو لسه شغال نجرّب الوضع اللي بعده، وفي الآخر نرجّع MODE_NORMAL.
+     * على أندرويد 12+ لو فضل شغال بنحدد سماعة الأذن صراحةً. سماعة بلوتوث شغالة = ما بنغيّرش الوضع.
      */
-    @SuppressWarnings("deprecation")
     private static void speakerOffViaAudioManager(AudioManager a) {
+        boolean bt = isBtScoOn(a);
+        if (!bt) {
+            int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
+            for (int mode : ladder) {
+                setModeTracked(a, mode);
+                speakerOffOnce(a);
+                if (!speakerActive(a)) break;
+            }
+        } else {
+            speakerOffOnce(a);
+        }
+        if (Build.VERSION.SDK_INT >= 31 && speakerActive(a)) {
+            routeToEarpiece(a);
+        }
+        if (!bt) setModeTracked(a, AudioManager.MODE_NORMAL);
+    }
+
+    private static void speakerOffOnce(AudioManager a) {
         if (Build.VERSION.SDK_INT >= 31) {
             try {
                 a.clearCommunicationDevice();
             } catch (Exception ignored) {
             }
         }
-        boolean bt = a.isBluetoothScoOn();
-        if (!bt) {
-            int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
-            for (int mode : ladder) {
-                setModeTracked(a, mode);
-                try {
-                    a.setSpeakerphoneOn(false);
-                } catch (Exception ignored) {
-                }
-                if (!speakerActive(a)) break;
-            }
-        } else {
-            try {
-                a.setSpeakerphoneOn(false);
-            } catch (Exception ignored) {
-            }
+        try {
+            a.setSpeakerphoneOn(false);
+        } catch (Exception ignored) {
         }
-        if (Build.VERSION.SDK_INT >= 31 && speakerActive(a)) {
-            routeToEarpiece(a);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static boolean isBtScoOn(AudioManager a) {
+        try {
+            return a.isBluetoothScoOn();
+        } catch (Exception e) {
+            return false;
         }
-        if (!bt) setModeTracked(a, AudioManager.MODE_NORMAL);
     }
 
     /** أندرويد 12+: لو clearCommunicationDevice ما نفعش، نحدد سماعة الأذن صراحةً. */

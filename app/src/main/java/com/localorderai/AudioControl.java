@@ -24,12 +24,8 @@ import android.telecom.CallAudioState;
  */
 final class AudioControl {
 
-    /** نفس ترتيب سلّم المحاولات في التطبيق المرجعي. */
-    private static final int[] SPEAKER_MODE_LADDER = {
-            AudioManager.MODE_IN_CALL,
-            AudioManager.MODE_NORMAL,
-            AudioManager.MODE_IN_COMMUNICATION
-    };
+    /** تأخير 1100ms قبل setSpeakerphoneOn على أندرويد < 31، زي التطبيق المرجعي. */
+    private static final long SPEAKER_LEGACY_DELAY_MS = 1100;
     /** تأخير بسيط قبل الميوت بعد تغيير الوضع (200ms زي المرجع). */
     private static final long MUTE_DELAY_MS = 200;
 
@@ -38,6 +34,13 @@ final class AudioControl {
 
     /** هل التطبيق غيّر وضع الصوت (setMode) ومحتاج يرجّعه؟ */
     private static boolean modeTouched;
+
+    /**
+     * على أندرويد 12+: هل آخر تشغيل للمكبر نجح عن طريق setCommunicationDevice؟
+     * لو لأ (نجح عن طريق setAudioRoute)، لما نقفله لازم نرجعه عن طريق setAudioRoute برضو.
+     * مبدئياً true (يعني clearCommunicationDevice كافية).
+     */
+    private static boolean setCdWorked = true;
 
     /** المستخدم قفل المكبر بإيده: الأوامر الأوتوماتيك ما تفتحوش تاني لحد آخر المكالمة. */
     private static boolean userSpeakerOff;
@@ -125,22 +128,41 @@ final class AudioControl {
         return isSpeakerOn(c) == on;
     }
 
-    private static void speakerOnViaAudioManager(AudioManager a) {
+    private static void speakerOnViaAudioManager(final AudioManager a) {
         if (Build.VERSION.SDK_INT >= 31) {
+            // المرجع: على 12+ بنجرّب setCommunicationDevice أوّلاً.
+            // لو نجح → نرجع فوراً، من غير ما نغيّر وضع الصوت خالص.
+            // لو فشل → نجرّب setAudioRoute(SPEAKER) عن طريق InCallService.
+            // **مش بنستخدم سلّم أوضاع الصوت على 12+ خالص** (ده كان سبب mode=2 في الـ toast).
             boolean ok = routeToBuiltInSpeaker(a);
+            setCdWorked = ok;
             lastOp = "ON: setCommunicationDevice=" + ok;
-            if (ok) return; // زي المرجع: على 12+ بنكتفي بكده ومنلعبش في وضع الصوت
-        }
-        for (int mode : SPEAKER_MODE_LADDER) {
-            setModeTracked(a, mode);
-            try {
-                a.setSpeakerphoneOn(true);
-            } catch (Exception ignored) {
+            if (ok) return;
+            // Fallback: setAudioRoute عبر InCallService (زي المرجع بالظبط)
+            DialerInCallService s = DialerInCallService.instance;
+            if (s != null) {
+                try {
+                    s.setAudioRoute(CallAudioState.ROUTE_SPEAKER);
+                    lastOp = "ON: setAudioRoute(SPEAKER)";
+                } catch (Exception ignored) {
+                }
             }
-            boolean on = a.isSpeakerphoneOn();
-            lastOp = "ON: ladder mode=" + mode + " spk=" + on;
-            if (on) return;
+            return; // على 12+ مش بنكمّل لأي خطوات تانية
         }
+        // أندرويد < 31: تأخير 1100ms زي المرجع، وبعدين setSpeakerphoneOn لو BT مش شغّال
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!isBtScoOn(a)) {
+                    setModeTracked(a, AudioManager.MODE_IN_CALL);
+                    try {
+                        a.setSpeakerphoneOn(true);
+                    } catch (Exception ignored) {
+                    }
+                    lastOp = "ON: setSpeakerphoneOn(true) legacy";
+                }
+            }
+        }, SPEAKER_LEGACY_DELAY_MS);
     }
 
     /**
@@ -166,49 +188,51 @@ final class AudioControl {
 
     /**
      * قفل المكبر زي المرجع بالظبط:
-     *  - أندرويد 12+: clearCommunicationDevice بس (من غير ما نغيّر وضع الصوت). لو فضل شغال نجرّب setSpeakerphoneOn(false)
-     *    وبعدها نحدد سماعة الأذن صراحةً.
-     *  - أندرويد 11 وأقل: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL)، ولو فضل شغال نجرّب IN_COMMUNICATION.
-     *  - سماعة بلوتوث شغالة (SCO): ما بنغيّرش وضع الصوت.
+     *  - أندرويد 12+: clearCommunicationDevice بس.
+     *    لو آخر تشغيل استخدم setAudioRoute كـ fallback، برجّعه عن طريق setAudioRoute(EARPIECE).
+     *    **مش بنستخدم setSpeakerphoneOn ولا setMode خالص على 12+.**
+     *  - أندرويد 11 وأقل: تأخير 1100ms ← لو BT مش شغّال: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL).
      */
-    private static void speakerOffViaAudioManager(AudioManager a) {
+    private static void speakerOffViaAudioManager(final AudioManager a) {
         if (Build.VERSION.SDK_INT >= 31) {
             try {
                 a.clearCommunicationDevice();
             } catch (Exception ignored) {
             }
-            lastOp = "OFF: clearCommunicationDevice";
-            if (!speakerActive(a)) return;
-            try {
-                a.setSpeakerphoneOn(false);
-            } catch (Exception ignored) {
+            // لو آخر تشغيل فشل في setCommunicationDevice واستخدم setAudioRoute → نعكسه
+            if (!setCdWorked) {
+                DialerInCallService s = DialerInCallService.instance;
+                if (s != null) {
+                    try {
+                        s.setAudioRoute(CallAudioState.ROUTE_EARPIECE);
+                        s.setAudioRoute(CallAudioState.ROUTE_WIRED_OR_EARPIECE);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
-            lastOp = "OFF: clear + setSpeakerphoneOn(false)";
-            if (!speakerActive(a)) return;
-            routeToEarpiece(a);
-            lastOp = "OFF: clear + spk(false) + earpiece";
+            setCdWorked = true; // reset للمكالمة الجاية
+            lastOp = "OFF: clearCommunicationDevice";
             return;
         }
+        // أندرويد < 31: لو BT شغّال ما بنعملش حاجة. غير كده تأخير 1100ms زي المرجع
         if (isBtScoOn(a)) {
-            speakerOffOnce(a);
-            lastOp = "OFF: bt, setSpeakerphoneOn(false)";
+            lastOp = "OFF: bt SCO on, skip";
             return;
         }
-        int[] ladder = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
-        for (int mode : ladder) {
-            setModeTracked(a, mode);
-            speakerOffOnce(a);
-            setModeTracked(a, AudioManager.MODE_NORMAL);
-            lastOp = "OFF: ladder mode=" + mode;
-            if (!speakerActive(a)) return;
-        }
-    }
-
-    private static void speakerOffOnce(AudioManager a) {
-        try {
-            a.setSpeakerphoneOn(false);
-        } catch (Exception ignored) {
-        }
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!isBtScoOn(a)) {
+                    setModeTracked(a, AudioManager.MODE_IN_CALL);
+                    try {
+                        a.setSpeakerphoneOn(false);
+                    } catch (Exception ignored) {
+                    }
+                    setModeTracked(a, AudioManager.MODE_NORMAL);
+                    lastOp = "OFF: setSpeakerphoneOn(false) legacy";
+                }
+            }
+        }, SPEAKER_LEGACY_DELAY_MS);
     }
 
     @SuppressWarnings("deprecation")
@@ -318,6 +342,7 @@ final class AudioControl {
     /** بداية مكالمة جديدة: قفل المستخدم اليدوي من المكالمة اللي فاتت ما يمتدش للجديدة. */
     static void newCall() {
         userSpeakerOff = false;
+        setCdWorked = true;
     }
 
     static void stopRouteWatch(Context c) {

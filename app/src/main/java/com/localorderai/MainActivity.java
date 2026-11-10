@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.role.RoleManager;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -144,9 +145,28 @@ public class MainActivity extends Activity {
         version.setPadding(0, 40, 0, 0);
         root.addView(version);
 
+        LinearLayout updateRow = new LinearLayout(this);
+        updateRow.setOrientation(LinearLayout.HORIZONTAL);
         updateBtn = new Button(this);
         updateBtn.setText("تحقق من التحديثات");
-        root.addView(updateBtn);
+        updateRow.addView(updateBtn, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button releaseBtn = new Button(this);
+        releaseBtn.setText("رابط النسخة");
+        updateRow.addView(releaseBtn, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        releaseBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(
+                            "https://github.com/meow42399-star/localorderai/releases/latest")));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "مفيش متصفح لفتح الرابط", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        root.addView(updateRow);
         updateStatus = new TextView(this);
         root.addView(updateStatus);
         updater = new UpdateManager(this, new UpdateManager.Status() {

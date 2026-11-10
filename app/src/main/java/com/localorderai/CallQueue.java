@@ -96,6 +96,27 @@ public final class CallQueue {
         }
     };
 
+    /** عدد مرات إعادة التفعيل المسموحة لما النظام يغيّر المسار (حماية من حلقة تنازع مع النظام). */
+    private int routeRetriesLeft;
+
+    private final Runnable routeLostRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (app == null || !autoSpeaker || routeRetriesLeft <= 0) return;
+            if (!(inCall || answered)) return;
+            if (AudioControl.isSpeakerOn(app)) return; // المسار اتغيّر لكن المكبر لسه شغال
+            routeRetriesLeft--;
+            AudioControl.ensureSpeaker(app, true);
+        }
+    };
+
+    private void startRouteWatch() {
+        if (app == null || !autoSpeaker) return;
+        routeRetriesLeft = 6;
+        AudioControl.newCall();
+        AudioControl.startRouteWatch(app, routeLostRunnable);
+    }
+
     private void scheduleAudio(long... delaysMs) {
         if (!autoSpeaker && !autoMute) return;
         for (long d : delaysMs) handler.postDelayed(audioRunnable, d);
@@ -234,6 +255,7 @@ public final class CallQueue {
         handler.removeCallbacks(ringTimeoutRunnable);
         notifyChanged();
         scheduleAudio(300, 1000, 2500);
+        startRouteWatch();
     }
 
     private void onDisconnected(Call call) {
@@ -245,6 +267,7 @@ public final class CallQueue {
         currentCall = null;
         answered = false;
         timedOut = false;
+        if (app != null) AudioControl.stopRouteWatch(app);
         scheduleNext();
     }
 
@@ -356,12 +379,14 @@ public final class CallQueue {
                 SpeakerAccessibilityService.beginCall(autoSpeaker);
                 // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
                 scheduleAudio(300, 1000, 2000, 3500, 5000, 7000, 10000);
+                startRouteWatch();
             }
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {
             if (inCall) {
                 inCall = false;
                 long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
                 handler.removeCallbacks(audioRunnable);
+                if (app != null) AudioControl.stopRouteWatch(app);
                 SpeakerAccessibilityService.endCall();
                 record("انتهت — المدة " + secs + " ثانية");
                 if (app != null) AudioControl.reset(app);

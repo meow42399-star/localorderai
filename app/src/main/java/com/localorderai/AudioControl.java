@@ -39,6 +39,12 @@ final class AudioControl {
     /** هل التطبيق غيّر وضع الصوت (setMode) ومحتاج يرجّعه؟ */
     private static boolean modeTouched;
 
+    /** المستخدم قفل المكبر بإيده: الأوامر الأوتوماتيك ما تفتحوش تاني لحد آخر المكالمة. */
+    private static boolean userSpeakerOff;
+
+    /** مستمع تغيّر سماعة الاتصال (أندرويد 12+). */
+    private static AudioManager.OnCommunicationDeviceChangedListener routeListener;
+
     private AudioControl() {
     }
 
@@ -68,8 +74,13 @@ final class AudioControl {
         return a.isSpeakerphoneOn();
     }
 
-    /** أمر مباشر (بيتنفذ دايماً، يدوي أو أوتوماتيك). */
+    /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
+        userSpeakerOff = !on;
+        applySpeaker(c, on);
+    }
+
+    private static void applySpeaker(Context c, boolean on) {
         DialerInCallService s = liveIcs();
         if (s != null) {
             s.setAudioRoute(on ? CallAudioState.ROUTE_SPEAKER : CallAudioState.ROUTE_WIRED_OR_EARPIECE);
@@ -90,10 +101,11 @@ final class AudioControl {
      */
     @SuppressWarnings("deprecation")
     static boolean ensureSpeaker(Context c, boolean on) {
+        if (on && userSpeakerOff) return false; // المستخدم قفله بإيده
         if (isSpeakerOn(c) == on) return true;
         // مش بنسحب الصوت من سماعة بلوتوث شغالة (زي التطبيق المرجعي)
         if (on && liveIcs() == null && am(c).isBluetoothScoOn()) return false;
-        setSpeaker(c, on);
+        applySpeaker(c, on);
         return isSpeakerOn(c) == on;
     }
 
@@ -183,12 +195,51 @@ final class AudioControl {
         return isMuted(c) == muted;
     }
 
+    // ------------------------------------------- مراقبة تغيّر المسار (أندرويد 12+)
+
+    /**
+     * لو النظام غيّر سماعة الاتصال وسط المكالمة (مثلاً رجّعها للسماعة العادية لما الطرف التاني رد)،
+     * بننادي onChange على الـ main thread. الـ onChange هو اللي بيقرر يعيد التفعيل أو لأ.
+     * على أندرويد أقدم من 12 مفيش مستمع، فالتكرار بالتوقيتات هو الأساس.
+     */
+    static void startRouteWatch(Context c, final Runnable onChange) {
+        if (Build.VERSION.SDK_INT < 31) return;
+        stopRouteWatch(c);
+        routeListener = new AudioManager.OnCommunicationDeviceChangedListener() {
+            @Override
+            public void onCommunicationDeviceChanged(AudioDeviceInfo device) {
+                MAIN.post(onChange);
+            }
+        };
+        try {
+            am(c).addOnCommunicationDeviceChangedListener(c.getMainExecutor(), routeListener);
+        } catch (Exception e) {
+            routeListener = null;
+        }
+    }
+
+    /** بداية مكالمة جديدة: قفل المستخدم اليدوي من المكالمة اللي فاتت ما يمتدش للجديدة. */
+    static void newCall() {
+        userSpeakerOff = false;
+    }
+
+    static void stopRouteWatch(Context c) {
+        if (Build.VERSION.SDK_INT < 31 || routeListener == null) return;
+        try {
+            am(c).removeOnCommunicationDeviceChangedListener(routeListener);
+        } catch (Exception ignored) {
+        }
+        routeListener = null;
+    }
+
     // ------------------------------------------------------------------ تنظيف
 
     /** آخر المكالمة: رجّع المكبر والميوت وشيل أي وضع صوت غيّره التطبيق. */
     static void reset(Context c) {
         MAIN.removeCallbacksAndMessages(TOKEN);
-        setSpeaker(c, false);
+        stopRouteWatch(c);
+        userSpeakerOff = false;
+        applySpeaker(c, false);
         setMuted(c, false);
         if (modeTouched) {
             modeTouched = false;

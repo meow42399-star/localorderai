@@ -167,6 +167,7 @@ public final class CallQueue {
     public void start(Context ctx, List<String> nums, int ringSec, boolean speaker, boolean mute, boolean basic) {
         if (running) return;
         app = ctx.getApplicationContext();
+        EventLog.add("start: " + nums.size() + " numbers, basic=" + basic + ", speaker=" + speaker + ", mute=" + mute);
         numbers.clear();
         numbers.addAll(nums);
         results.clear();
@@ -183,6 +184,7 @@ public final class CallQueue {
 
     public void stop() {
         if (!running) return;
+        EventLog.add("stop requested");
         running = false;
         handler.removeCallbacks(nextRunnable);
         handler.removeCallbacks(noCallRunnable);
@@ -233,6 +235,7 @@ public final class CallQueue {
 
     /** بتتنادى من DialerInCallService لما أي مكالمة تضاف. */
     public void onCallAdded(Call call) {
+        EventLog.add("call added, state=" + call.getState());
         if (!running || !waitingForCall) return;
         if (call.getState() == Call.STATE_RINGING) return; // مكالمة واردة مش بتاعتنا
         waitingForCall = false;
@@ -300,6 +303,7 @@ public final class CallQueue {
     private void record(String text) {
         if (index < 0 || index >= numbers.size()) return;
         results.add((index + 1) + ". " + numbers.get(index) + " — " + text);
+        EventLog.add("result #" + (index + 1) + ": " + text);
         notifyChanged();
     }
 
@@ -367,6 +371,7 @@ public final class CallQueue {
 
     void onPhoneState(int state) {
         if (!running || !basicMode) return;
+        EventLog.add("phone state " + state + " (0=idle, 2=offhook)");
         if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
             if (waitingForCall) {
                 waitingForCall = false;

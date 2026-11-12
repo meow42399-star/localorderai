@@ -6,3 +6,10 @@
 - لازم يتفعّل كتطبيق الاتصال الافتراضي (Default Dialer).
 - كل push على `main` بيبني APK موقّع وينشره كـ Release جديد (`v2.0.N`)، والتطبيق بينبّهك للتحديث.
 - التوقيع بيتم من GitHub Secrets (`KEYSTORE_BASE64` و`KEYSTORE_PASSWORD` و`KEY_ALIAS` و`KEY_PASSWORD`) — متغيّرهمش عشان التحديثات تفضل شغالة.
+
+## تقارير المشاكل
+
+- من التطبيق: زرار **ابعت تقرير المشكلة** بيفتح Issue جاهزة على GitHub (الأرقام بتتخبّى، آخر 3 أرقام بس)، أو **انسخ التقرير** للحافظة.
+- أي crash بيتسجّل لوحده ويظهر عرض إرسال في المرة الجاية.
+- القراءة (من غير توكين، الريبو عام): `https://github.com/meow42399-star/localorderai/issues`
+  أو `curl https://api.github.com/repos/meow42399-star/localorderai/issues`

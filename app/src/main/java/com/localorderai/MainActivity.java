@@ -2,6 +2,7 @@ package com.localorderai;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.role.RoleManager;
 import android.content.Context;
 import android.content.Intent;
@@ -186,7 +187,32 @@ public class MainActivity extends Activity {
             }
         });
 
+        LinearLayout reportRow = new LinearLayout(this);
+        reportRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button reportBtn = new Button(this);
+        reportBtn.setText("ابعت تقرير المشكلة");
+        reportRow.addView(reportBtn, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button copyBtn = new Button(this);
+        copyBtn.setText("انسخ التقرير");
+        reportRow.addView(copyBtn, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(reportRow);
+        reportBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                ReportBuilder.openIssue(MainActivity.this);
+            }
+        });
+        copyBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                ReportBuilder.copy(MainActivity.this);
+            }
+        });
+
         setContentView(scroll);
+        if (CrashLogger.read(this) != null) showCrashDialog();
 
         roleBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -226,6 +252,25 @@ public class MainActivity extends Activity {
     protected void onStop() {
         CallQueue.get().removeListener(queueListener);
         super.onStop();
+    }
+
+    private void showCrashDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("التطبيق وقف المرة اللي فاتت")
+                .setMessage("تحب تبعت تقرير بالمشكلة؟ (الأرقام بتتخبّى)")
+                .setPositiveButton("ابعت", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        ReportBuilder.openIssue(MainActivity.this);
+                    }
+                })
+                .setNegativeButton("تجاهل", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        CrashLogger.clear(MainActivity.this);
+                    }
+                })
+                .show();
     }
 
     private boolean hasDialerRole() {

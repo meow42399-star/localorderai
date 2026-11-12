@@ -149,18 +149,25 @@ final class AudioControl {
             }
             return; // على 12+ مش بنكمّل لأي خطوات تانية
         }
-        // أندرويد < 31: تأخير 1100ms زي المرجع، وبعدين setSpeakerphoneOn لو BT مش شغّال
+        // أندرويد < 31: تأخير 1100ms، وبعدين سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION.
+        // بعد كل خطوة بنتأكد إن المكبر اشتغل فعلاً (isSpeakerphoneOn) قبل ما نكمّل للي بعدها.
         MAIN.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (!isBtScoOn(a)) {
-                    setModeTracked(a, AudioManager.MODE_IN_CALL);
+                if (isBtScoOn(a)) return;
+                int[] modes = {AudioManager.MODE_IN_CALL, AudioManager.MODE_NORMAL,
+                        AudioManager.MODE_IN_COMMUNICATION};
+                StringBuilder log = new StringBuilder();
+                for (int m : modes) {
+                    if (legacySpeakerOn(a)) break;
+                    setModeTracked(a, m);
                     try {
                         a.setSpeakerphoneOn(true);
                     } catch (Exception ignored) {
                     }
-                    lastOp = "ON: setSpeakerphoneOn(true) legacy";
+                    log.append("m").append(m).append("→").append(legacySpeakerOn(a)).append(' ');
                 }
+                lastOp = "ON legacy: " + log + (legacySpeakerOn(a) ? "✔" : "✘");
             }
         }, SPEAKER_LEGACY_DELAY_MS);
     }
@@ -233,6 +240,15 @@ final class AudioControl {
                 }
             }
         }, SPEAKER_LEGACY_DELAY_MS);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static boolean legacySpeakerOn(AudioManager a) {
+        try {
+            return a.isSpeakerphoneOn();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @SuppressWarnings("deprecation")

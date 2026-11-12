@@ -11,16 +11,14 @@ import android.telecom.CallAudioState;
 /**
  * تحكم في المكبر والميوت.
  *
- * الاستراتيجية (مبنية على تحليل تطبيق auto-dial المرجعي):
- *  1) لو التطبيق هو الـ Default Dialer وفيه مكالمة حيّة: نستخدم InCallService (setAudioRoute / setMuted) — ده الأضمن.
- *  2) غير كده بنستخدم AudioManager:
- *     - أندرويد 12+: setCommunicationDevice(سماعة الموبايل الداخلية) ونتأكد من النتيجة.
- *     - لو ما نفعش (أو أندرويد أقدم): سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION،
- *       وفي كل خطوة setSpeakerphoneOn(true) ونتحقق من isSpeakerphoneOn قبل ما نكمّل للخطوة اللي بعدها.
- *  3) الأوامر الأوتوماتيك (ensure*) بتتحقق من الحالة الأول ومش بتعمل أي حاجة لو الحالة صح،
- *     فالتكرار بالتوقيتات آمن ومش بيقلب المكبر يمين وشمال.
- *  4) الأوامر الأوتوماتيك بتحترم سماعة البلوتوث (مش بتسحب الصوت منها)، لكن ضغطة المستخدم اليدوية بتتنفذ دايماً.
- *  5) في الآخر reset() بيرجّع المكبر/الميوت وبيشيل أي وضع صوت التطبيق غيّره.
+ *  - الوضع الكامل (التطبيق هو الـ Default Dialer ومعاه مكالمة حيّة): InCallService (CallEndpoint / setAudioRoute).
+ *  - الوضع البسيط، المكبر:
+ *      أندرويد 12+: النظام بيتجاهل طلبات مسار الصوت من تطبيق عادي أثناء مكالمة الشبكة،
+ *                   فالمكبر بيتفعّل بالضغط على زرار شاشة المكالمة عن طريق SpeakerAccessibilityService.
+ *      أندرويد 11 وأقل: AudioManager (سلّم أوضاع صوت مع التأكد من isSpeakerphoneOn).
+ *  - الميوت (الوضعين): setMode(IN_CALL) ثم setMicrophoneMute بعد تأخير بسيط.
+ *  - ensure* بتتحقق من الحالة الأول ومش بتعمل حاجة لو الحالة مظبوطة، فالتكرار بالتوقيتات آمن.
+ *  - reset() آخر المكالمة بيرجّع المكبر والميوت ووضع الصوت.
  */
 final class AudioControl {
 
@@ -35,18 +33,8 @@ final class AudioControl {
     /** هل التطبيق غيّر وضع الصوت (setMode) ومحتاج يرجّعه؟ */
     private static boolean modeTouched;
 
-    /**
-     * على أندرويد 12+: هل آخر تشغيل للمكبر نجح عن طريق setCommunicationDevice؟
-     * لو لأ (نجح عن طريق setAudioRoute)، لما نقفله لازم نرجعه عن طريق setAudioRoute برضو.
-     * مبدئياً true (يعني clearCommunicationDevice كافية).
-     */
-    private static boolean setCdWorked = true;
-
     /** المستخدم قفل المكبر بإيده: الأوامر الأوتوماتيك ما تفتحوش تاني لحد آخر المكالمة. */
     private static boolean userSpeakerOff;
-
-    /** عشان نسجّل قايمة أجهزة الصوت مرة واحدة في كل مكالمة. */
-    private static boolean devicesLogged;
 
     /** مستمع تغيّر سماعة الاتصال (أندرويد 12+). */
     private static AudioManager.OnCommunicationDeviceChangedListener routeListener;
@@ -70,6 +58,7 @@ final class AudioControl {
         }
         DialerInCallService ics = DialerInCallService.instance;
         b.append(" | ics ").append(ics == null ? "no" : ("yes " + ics.describeEndpoints()));
+        b.append(" | acc ").append(SpeakerAccessibilityService.isConnected() ? "on" : "off");
         b.append(" | ").append(lastOp);
         return b.toString();
     }
@@ -100,9 +89,13 @@ final class AudioControl {
         return speakerActive(am(c));
     }
 
-    /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
+/** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
         userSpeakerOff = !on;
+        if (liveIcs() == null && Build.VERSION.SDK_INT >= 31) {
+            SpeakerAccessibilityService.request(on);
+            return;
+        }
         applySpeaker(c, on);
     }
 
@@ -119,11 +112,15 @@ final class AudioControl {
             EventLog.add("audio " + lastOp);
             return;
         }
-        AudioManager a = am(c);
+        if (Build.VERSION.SDK_INT >= 31) {
+            // التفعيل بيتم بضغط زرار شاشة المكالمة. القفل مش محتاج حاجة: النظام بيرجّع المسار لوحده لما المكالمة تخلص.
+            if (on) SpeakerAccessibilityService.nudge();
+            return;
+        }
         if (on) {
-            speakerOnViaAudioManager(a);
+            speakerOnLegacy(am(c));
         } else {
-            speakerOffViaAudioManager(a);
+            speakerOffLegacy(am(c));
         }
     }
 
@@ -142,66 +139,8 @@ final class AudioControl {
         return isSpeakerOn(c) == on;
     }
 
-    private static void speakerOnViaAudioManager(final AudioManager a) {
-        if (Build.VERSION.SDK_INT >= 31) {
-            // المرجع: على 12+ بنجرّب setCommunicationDevice أوّلاً.
-            // لو نجح → نرجع فوراً، من غير ما نغيّر وضع الصوت خالص.
-            // لو فشل → نجرّب setAudioRoute(SPEAKER) عن طريق InCallService.
-            // **مش بنستخدم سلّم أوضاع الصوت على 12+ خالص** (ده كان سبب mode=2 في الـ toast).
-            if (!devicesLogged) {
-                devicesLogged = true;
-                StringBuilder dl = new StringBuilder();
-                try {
-                    for (AudioDeviceInfo d : a.getAvailableCommunicationDevices()) dl.append(d.getType()).append(' ');
-                } catch (Exception e) {
-                    dl.append("err ").append(e.getClass().getSimpleName());
-                }
-                EventLog.add("audio devices(types): " + dl);
-            }
-            boolean ok = routeToBuiltInSpeaker(a);
-            setCdWorked = ok;
-            lastOp = "ON: setCommunicationDevice=" + ok;
-            EventLog.add("audio ON: setCommunicationDevice=" + ok + " now dev=" + commDeviceType(a)
-                    + " spk=" + legacySpeakerOn(a) + " mode=" + a.getMode());
-            // نجاح النداء مش كفاية: لازم نتأكد إن النظام طبّق السماعة فعلاً (قراءة الجهاز الحالي).
-            if (ok && speakerActive(a)) return;
-
-            // مش متطبّق: غالباً لأننا مش "مالك وضع الصوت" أثناء مكالمة الشبكة.
-            // بنحاول ناخد الملكية بـ setMode (زي ما المرجع بيعمل في الكتم)، ونعيد الطلب ونتأكد بعد كل خطوة.
-            StringBuilder log = new StringBuilder();
-            int[] modes = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
-            for (int m : modes) {
-                setModeTracked(a, m);
-                boolean ok2 = routeToBuiltInSpeaker(a);
-                boolean active = speakerActive(a);
-                log.append("mode").append(m).append("(now=").append(a.getMode()).append(") set=").append(ok2)
-                        .append(" dev=").append(commDeviceType(a)).append(" spk=").append(legacySpeakerOn(a))
-                        .append(" → ").append(active).append("; ");
-                if (active) break;
-            }
-            if (!speakerActive(a)) {
-                try {
-                    a.setSpeakerphoneOn(true);
-                } catch (Exception ignored) {
-                }
-                log.append("setSpeakerphoneOn → ").append(speakerActive(a)).append("; ");
-            }
-            lastOp = "ON 12+ ladder: " + log + (speakerActive(a) ? "✔" : "✘");
-            EventLog.add("audio " + lastOp);
-            if (speakerActive(a)) return;
-            // آخر احتياطي: setAudioRoute عبر InCallService (بيشتغل بس لو التطبيق هو الـ Default Dialer)
-            DialerInCallService s = DialerInCallService.instance;
-            if (s != null) {
-                try {
-                    s.setAudioRoute(CallAudioState.ROUTE_SPEAKER);
-                    lastOp = "ON: setAudioRoute(SPEAKER)";
-                } catch (Exception ignored) {
-                }
-            }
-            return;
-        }
-        // أندرويد < 31: تأخير 1100ms، وبعدين سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION.
-        // بعد كل خطوة بنتأكد إن المكبر اشتغل فعلاً (isSpeakerphoneOn) قبل ما نكمّل للي بعدها.
+    /** أندرويد 11 وأقل: بعد 1100ms سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION، ونتأكد بعد كل خطوة. */
+    private static void speakerOnLegacy(final AudioManager a) {
         MAIN.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -245,34 +184,8 @@ final class AudioControl {
         return sp;
     }
 
-    /**
-     * قفل المكبر زي المرجع بالظبط:
-     *  - أندرويد 12+: clearCommunicationDevice بس.
-     *    لو آخر تشغيل استخدم setAudioRoute كـ fallback، برجّعه عن طريق setAudioRoute(EARPIECE).
-     *    **مش بنستخدم setSpeakerphoneOn ولا setMode خالص على 12+.**
-     *  - أندرويد 11 وأقل: تأخير 1100ms ← لو BT مش شغّال: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL).
-     */
-    private static void speakerOffViaAudioManager(final AudioManager a) {
-        if (Build.VERSION.SDK_INT >= 31) {
-            try {
-                a.clearCommunicationDevice();
-            } catch (Exception ignored) {
-            }
-            // لو آخر تشغيل فشل في setCommunicationDevice واستخدم setAudioRoute → نعكسه
-            if (!setCdWorked) {
-                DialerInCallService s = DialerInCallService.instance;
-                if (s != null) {
-                    try {
-                        s.setAudioRoute(CallAudioState.ROUTE_EARPIECE);
-                        s.setAudioRoute(CallAudioState.ROUTE_WIRED_OR_EARPIECE);
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-            setCdWorked = true; // reset للمكالمة الجاية
-            lastOp = "OFF: clearCommunicationDevice";
-            return;
-        }
+    /** أندرويد 11 وأقل: لو BT شغّال ما بنعملش حاجة. غير كده بعد 1100ms: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL). */
+    private static void speakerOffLegacy(final AudioManager a) {
         // أندرويد < 31: لو BT شغّال ما بنعملش حاجة. غير كده تأخير 1100ms زي المرجع
         if (isBtScoOn(a)) {
             lastOp = "OFF: bt SCO on, skip";
@@ -294,16 +207,6 @@ final class AudioControl {
         }, SPEAKER_LEGACY_DELAY_MS);
     }
 
-    private static int commDeviceType(AudioManager a) {
-        if (Build.VERSION.SDK_INT < 31) return -1;
-        try {
-            AudioDeviceInfo d = a.getCommunicationDevice();
-            return d == null ? -1 : d.getType();
-        } catch (Exception e) {
-            return -2;
-        }
-    }
-
     @SuppressWarnings("deprecation")
     private static boolean legacySpeakerOn(AudioManager a) {
         try {
@@ -320,32 +223,6 @@ final class AudioControl {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    /** أندرويد 12+: لو clearCommunicationDevice ما نفعش، نحدد سماعة الأذن صراحةً. */
-    private static void routeToEarpiece(AudioManager a) {
-        try {
-            for (AudioDeviceInfo d : a.getAvailableCommunicationDevices()) {
-                if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
-                    a.setCommunicationDevice(d);
-                    return;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    /** أندرويد 12+: بيختار سماعة الموبايل الداخلية، ويرجّع نتيجة الطلب الحقيقية (مش بنتجاهلها). */
-    private static boolean routeToBuiltInSpeaker(AudioManager a) {
-        try {
-            for (AudioDeviceInfo d : a.getAvailableCommunicationDevices()) {
-                if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    return a.setCommunicationDevice(d);
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
     }
 
     // ----------------------------------------------------------------- الميوت
@@ -419,9 +296,7 @@ final class AudioControl {
 
     /** بداية مكالمة جديدة: قفل المستخدم اليدوي من المكالمة اللي فاتت ما يمتدش للجديدة. */
     static void newCall() {
-        devicesLogged = false;
         userSpeakerOff = false;
-        setCdWorked = true;
     }
 
     static void stopRouteWatch(Context c) {
@@ -440,6 +315,7 @@ final class AudioControl {
         EventLog.add("audio reset (last op: " + lastOp + ")");
         MAIN.removeCallbacksAndMessages(TOKEN);
         stopRouteWatch(c);
+        SpeakerAccessibilityService.stop();
         userSpeakerOff = false;
         applySpeaker(c, false);
         setMuted(c, false);

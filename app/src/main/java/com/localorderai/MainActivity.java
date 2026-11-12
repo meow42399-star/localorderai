@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
     private EditText numbersEdit, ringEdit;
     private CheckBox speakerCheck, muteCheck;
     private TextView statusView, resultsView;
-    private Button roleBtn, startBtn, stopBtn, updateBtn;
+    private Button roleBtn, accBtn, startBtn, stopBtn, updateBtn;
     private TextView updateStatus;
     private UpdateManager updater;
     private SharedPreferences prefs;
@@ -86,38 +86,9 @@ public class MainActivity extends Activity {
         muteCheck.setChecked(prefs.getBoolean("mute", false));
         root.addView(muteCheck);
 
-        LinearLayout liveRow = new LinearLayout(this);
-        liveRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button liveSpeaker = new Button(this);
-        liveSpeaker.setText("المكبر الآن: تشغيل/إيقاف");
         Button liveMute = new Button(this);
         liveMute.setText("الميوت الآن: تشغيل/إيقاف");
-        liveRow.addView(liveSpeaker, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        liveRow.addView(liveMute, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(liveRow);
-        liveSpeaker.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                final boolean on = !AudioControl.isSpeakerOn(MainActivity.this);
-                AudioControl.setSpeaker(MainActivity.this, on);
-                // نعرض الحالة الفعلية بعد لحظة (مش بس اللي طلبناه)
-                v.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        boolean now = AudioControl.isSpeakerOn(MainActivity.this);
-                        String msg;
-                        if (now == on) {
-                            msg = on ? "المكبر شغال" : "المكبر مقفول";
-                        } else {
-                            msg = on ? "المكبر ما اشتغلش" : "المكبر لسه شغال (النظام رفض القفل)";
-                        }
-                        Toast.makeText(MainActivity.this,
-                                msg + "\n" + AudioControl.diagnose(MainActivity.this),
-                                Toast.LENGTH_LONG).show();
-                    }
-                }, 400);
-            }
-        });
+        root.addView(liveMute);
         liveMute.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -128,7 +99,7 @@ public class MainActivity extends Activity {
         });
 
         TextView ringLabel = new TextView(this);
-        ringLabel.setText("أقصى مدة رنين (ثواني) قبل الانتقال للرقم التالي:");
+        ringLabel.setText("أقصى مدة رنين (ثواني) قبل الانتقال للرقم التالي (الوضع الكامل فقط):");
         root.addView(ringLabel);
         ringEdit = new EditText(this);
         ringEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -145,6 +116,9 @@ public class MainActivity extends Activity {
         roleBtn = new Button(this);
         roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
         root.addView(roleBtn);
+        accBtn = new Button(this);
+        accBtn.setText("تفعيل خدمة المكبر (إمكانية الوصول)");
+        root.addView(accBtn);
         startBtn = new Button(this);
         startBtn.setText("ابدأ");
         root.addView(startBtn);
@@ -228,6 +202,15 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         if (CrashLogger.read(this) != null) showCrashDialog();
 
+        accBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this,
+                        "فعّل «LocalOrderAI - زر المكبر». لو الخيار رمادي: إعدادات التطبيق ← ⋮ ← السماح بالإعدادات المقيّدة",
+                        Toast.LENGTH_LONG).show();
+                startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }
+        });
         roleBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -413,9 +396,19 @@ public class MainActivity extends Activity {
     private void render() {
         CallQueue q = CallQueue.get();
         StringBuilder st = new StringBuilder();
-        st.append(hasDialerRole()
+        boolean full = hasDialerRole();
+        st.append(full
                 ? "الوضع الكامل: التطبيق هو الاتصال الافتراضي (بيعرف مين قفل + مكبر مضمون)"
-                : "الوضع البسيط: المكبر بيشتغل حسب نوع الموبايل ومش بيعرف مين قفل");
+                : "الوضع البسيط: المكبر بالضغط على زرار شاشة المكالمة، ومش بيعرف مين قفل");
+        boolean needAcc = !full && Build.VERSION.SDK_INT >= 31;
+        if (needAcc) {
+            st.append("\nخدمة المكبر: ")
+                    .append(SpeakerAccessibilityService.isConnected() ? "شغالة" : "مش مفعّلة (المكبر مش هيشتغل من غيرها)");
+            if (!SpeakerAccessibilityService.lastInfo.isEmpty()) {
+                st.append("\n").append(SpeakerAccessibilityService.lastInfo);
+            }
+        }
+        accBtn.setVisibility(needAcc && !SpeakerAccessibilityService.isConnected() ? View.VISIBLE : View.GONE);
         if (q.isRunning()) {
             st.append("\nشغال: رقم ").append(q.getCurrentPosition()).append(" من ").append(q.getTotal());
         }

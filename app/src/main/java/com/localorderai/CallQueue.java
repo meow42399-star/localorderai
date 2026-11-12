@@ -9,7 +9,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.telecom.Call;
-import android.telecom.CallAudioState;
 import android.telecom.DisconnectCause;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
@@ -398,17 +397,23 @@ public final class CallQueue {
                 inCall = true;
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
-                // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
-                scheduleAudio(0, 300, 1000, 2000, 3500, 5000, 7000, 10000);
-                startRouteWatch();
+                AudioControl.newCall();
+                // المكبر: بيتفعّل بضغط زرار شاشة المكالمة (Accessibility)، والتكرار بيتابع ظهور الشاشة
+                if (autoSpeaker) {
+                    if (!SpeakerAccessibilityService.isConnected() && Build.VERSION.SDK_INT >= 31) {
+                        EventLog.add("speaker: خدمة المكبر (Accessibility) مش مفعّلة");
+                    }
+                    SpeakerAccessibilityService.request(true);
+                }
+                scheduleAudio(0, 800, 1500, 3000, 5000, 8000, 12000);
             }
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {
             if (inCall) {
                 inCall = false;
                 long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
                 handler.removeCallbacks(audioRunnable);
-                if (app != null) AudioControl.stopRouteWatch(app);
-                        record("انتهت — المدة " + secs + " ثانية");
+                SpeakerAccessibilityService.stop();
+                record("انتهت — المدة " + secs + " ثانية");
                 if (app != null) AudioControl.reset(app);
                 scheduleNext();
             }

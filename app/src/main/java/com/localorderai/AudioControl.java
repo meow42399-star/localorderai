@@ -45,6 +45,9 @@ final class AudioControl {
     /** المستخدم قفل المكبر بإيده: الأوامر الأوتوماتيك ما تفتحوش تاني لحد آخر المكالمة. */
     private static boolean userSpeakerOff;
 
+    /** عشان نسجّل قايمة أجهزة الصوت مرة واحدة في كل مكالمة. */
+    private static boolean devicesLogged;
+
     /** مستمع تغيّر سماعة الاتصال (أندرويد 12+). */
     private static AudioManager.OnCommunicationDeviceChangedListener routeListener;
 
@@ -134,9 +137,21 @@ final class AudioControl {
             // لو نجح → نرجع فوراً، من غير ما نغيّر وضع الصوت خالص.
             // لو فشل → نجرّب setAudioRoute(SPEAKER) عن طريق InCallService.
             // **مش بنستخدم سلّم أوضاع الصوت على 12+ خالص** (ده كان سبب mode=2 في الـ toast).
+            if (!devicesLogged) {
+                devicesLogged = true;
+                StringBuilder dl = new StringBuilder();
+                try {
+                    for (AudioDeviceInfo d : a.getAvailableCommunicationDevices()) dl.append(d.getType()).append(' ');
+                } catch (Exception e) {
+                    dl.append("err ").append(e.getClass().getSimpleName());
+                }
+                EventLog.add("audio devices(types): " + dl);
+            }
             boolean ok = routeToBuiltInSpeaker(a);
             setCdWorked = ok;
             lastOp = "ON: setCommunicationDevice=" + ok;
+            EventLog.add("audio ON: setCommunicationDevice=" + ok + " now dev=" + commDeviceType(a)
+                    + " spk=" + legacySpeakerOn(a) + " mode=" + a.getMode());
             if (ok) return;
             // Fallback: setAudioRoute عبر InCallService (زي المرجع بالظبط)
             DialerInCallService s = DialerInCallService.instance;
@@ -168,6 +183,7 @@ final class AudioControl {
                     log.append("m").append(m).append("→").append(legacySpeakerOn(a)).append(' ');
                 }
                 lastOp = "ON legacy: " + log + (legacySpeakerOn(a) ? "✔" : "✘");
+                EventLog.add("audio " + lastOp);
             }
         }, SPEAKER_LEGACY_DELAY_MS);
     }
@@ -240,6 +256,16 @@ final class AudioControl {
                 }
             }
         }, SPEAKER_LEGACY_DELAY_MS);
+    }
+
+    private static int commDeviceType(AudioManager a) {
+        if (Build.VERSION.SDK_INT < 31) return -1;
+        try {
+            AudioDeviceInfo d = a.getCommunicationDevice();
+            return d == null ? -1 : d.getType();
+        } catch (Exception e) {
+            return -2;
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -357,6 +383,7 @@ final class AudioControl {
 
     /** بداية مكالمة جديدة: قفل المستخدم اليدوي من المكالمة اللي فاتت ما يمتدش للجديدة. */
     static void newCall() {
+        devicesLogged = false;
         userSpeakerOff = false;
         setCdWorked = true;
     }
@@ -374,6 +401,7 @@ final class AudioControl {
 
     /** آخر المكالمة: رجّع المكبر والميوت وشيل أي وضع صوت غيّره التطبيق. */
     static void reset(Context c) {
+        EventLog.add("audio reset (last op: " + lastOp + ")");
         MAIN.removeCallbacksAndMessages(TOKEN);
         stopRouteWatch(c);
         userSpeakerOff = false;

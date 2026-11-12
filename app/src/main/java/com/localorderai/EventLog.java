@@ -8,7 +8,7 @@ import java.util.Locale;
 /** سجل صغير لآخر الأحداث (في الذاكرة) بيتضاف للتقرير. الأرقام بتتخبّى. */
 final class EventLog {
 
-    private static final int MAX = 40;
+    private static final int MAX = 80;
     private static final ArrayDeque<String> Q = new ArrayDeque<>();
     private static final SimpleDateFormat FMT = new SimpleDateFormat("HH:mm:ss", Locale.US);
 

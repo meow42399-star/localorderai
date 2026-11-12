@@ -18,7 +18,12 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.telecom.PhoneAccount;
+import android.telecom.PhoneAccountHandle;
+import android.telecom.TelecomManager;
+import android.widget.ArrayAdapter;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -37,6 +42,8 @@ public class MainActivity extends Activity {
     private TextView updateStatus;
     private UpdateManager updater;
     private SharedPreferences prefs;
+    private Spinner simSpinner;
+    private final List<PhoneAccountHandle> simHandles = new ArrayList<>();
 
     private final CallQueue.Listener queueListener = new CallQueue.Listener() {
         @Override
@@ -127,6 +134,13 @@ public class MainActivity extends Activity {
         ringEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
         ringEdit.setText(String.valueOf(prefs.getInt("ring", 45)));
         root.addView(ringEdit);
+
+        TextView simLabel = new TextView(this);
+        simLabel.setText("الشريحة المستخدمة في الاتصال:");
+        root.addView(simLabel);
+        simSpinner = new Spinner(this);
+        root.addView(simSpinner);
+        loadSims();
 
         roleBtn = new Button(this);
         roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
@@ -254,6 +268,29 @@ public class MainActivity extends Activity {
         super.onStop();
     }
 
+    private void loadSims() {
+        List<String> labels = new ArrayList<>();
+        labels.add("الافتراضية (النظام يختار أو يسأل)");
+        simHandles.clear();
+        try {
+            if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                TelecomManager tm = (TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+                int i = 1;
+                for (PhoneAccountHandle h : tm.getCallCapablePhoneAccounts()) {
+                    PhoneAccount pa = tm.getPhoneAccount(h);
+                    CharSequence l = pa == null ? null : pa.getLabel();
+                    labels.add("شريحة " + i + (l == null ? "" : " — " + l));
+                    simHandles.add(h);
+                    i++;
+                }
+            }
+        } catch (SecurityException ignored) {
+        }
+        simSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
+        int saved = prefs.getInt("sim", 0);
+        if (saved >= 0 && saved <= simHandles.size()) simSpinner.setSelection(saved);
+    }
+
     private void showCrashDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("التطبيق وقف المرة اللي فاتت")
@@ -316,6 +353,11 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(code, perms, results);
         if (code != REQ_PERMS) return;
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+            loadSims();
+            if (simHandles.size() > 1 && simSpinner.getSelectedItemPosition() == 0) {
+                Toast.makeText(this, "اختار الشريحة من القايمة، وبعدين اضغط ابدأ", Toast.LENGTH_LONG).show();
+                return;
+            }
             proceedStart();
         } else {
             Toast.makeText(this, "لازم تسمح بصلاحية الاتصال", Toast.LENGTH_LONG).show();
@@ -343,6 +385,9 @@ public class MainActivity extends Activity {
             startForegroundService(new Intent(this, QueueService.class));
         } catch (Exception ignored) {
         }
+        int simIdx = simSpinner.getSelectedItemPosition();
+        prefs.edit().putInt("sim", simIdx).apply();
+        CallQueue.get().setAccount(simIdx > 0 && simIdx <= simHandles.size() ? simHandles.get(simIdx - 1) : null);
         CallQueue.get().start(this, nums, ring, speakerCheck.isChecked(), muteCheck.isChecked(), !hasDialerRole());
     }
 

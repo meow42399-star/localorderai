@@ -11,6 +11,7 @@ import android.os.SystemClock;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
 import android.telecom.DisconnectCause;
+import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
@@ -50,6 +51,7 @@ public final class CallQueue {
     private int ringTimeoutSec = 45;
     private boolean autoSpeaker = true;
     private boolean autoMute = false;
+    private PhoneAccountHandle account;
 
     // الوضع البسيط (من غير Default Dialer)
     private boolean basicMode;
@@ -69,7 +71,7 @@ public final class CallQueue {
         public void run() {
             if (!waitingForCall) return;
             waitingForCall = false;
-            record("فشل: المكالمة ما بدأتش");
+            record("فشل: المكالمة ما بدأتش (لو ظهرت شاشة اختيار شريحة، اختار الشريحة من التطبيق)");
             scheduleNext();
         }
     };
@@ -134,6 +136,11 @@ public final class CallQueue {
     };
 
     private CallQueue() {
+    }
+
+    /** الشريحة المستخدمة في الاتصال (null = النظام يختار أو يسأل). */
+    public void setAccount(PhoneAccountHandle h) {
+        account = h;
     }
 
     public void addListener(Listener l) {
@@ -223,10 +230,19 @@ public final class CallQueue {
         audioRunnable.run();
         try {
             TelecomManager tm = (TelecomManager) app.getSystemService(Context.TELECOM_SERVICE);
-            tm.placeCall(Uri.fromParts("tel", n, null), new Bundle());
+            Bundle extras = new Bundle();
+            if (account != null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account);
+            EventLog.add("placeCall #" + (index + 1) + " " + n + " sim=" + (account == null ? "default" : "chosen"));
+            tm.placeCall(Uri.fromParts("tel", n, null), extras);
         } catch (SecurityException e) {
             waitingForCall = false;
             record("فشل: مفيش صلاحية اتصال");
+            scheduleNext();
+            return;
+        } catch (Exception e) {
+            waitingForCall = false;
+            EventLog.add("placeCall error: " + e);
+            record("فشل: " + e.getClass().getSimpleName());
             scheduleNext();
             return;
         }

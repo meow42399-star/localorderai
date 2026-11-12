@@ -399,7 +399,7 @@ public final class CallQueue {
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
                 // الصوت بيتظبط لما المكالمة تتوصّل، فبنكرر التطبيق كذا مرة
-                scheduleAudio(300, 1000, 2000, 3500, 5000, 7000, 10000);
+                scheduleAudio(0, 300, 1000, 2000, 3500, 5000, 7000, 10000);
                 startRouteWatch();
             }
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {

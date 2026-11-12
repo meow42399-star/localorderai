@@ -163,8 +163,33 @@ final class AudioControl {
             lastOp = "ON: setCommunicationDevice=" + ok;
             EventLog.add("audio ON: setCommunicationDevice=" + ok + " now dev=" + commDeviceType(a)
                     + " spk=" + legacySpeakerOn(a) + " mode=" + a.getMode());
-            if (ok) return;
-            // Fallback: setAudioRoute عبر InCallService (زي المرجع بالظبط)
+            // نجاح النداء مش كفاية: لازم نتأكد إن النظام طبّق السماعة فعلاً (قراءة الجهاز الحالي).
+            if (ok && speakerActive(a)) return;
+
+            // مش متطبّق: غالباً لأننا مش "مالك وضع الصوت" أثناء مكالمة الشبكة.
+            // بنحاول ناخد الملكية بـ setMode (زي ما المرجع بيعمل في الكتم)، ونعيد الطلب ونتأكد بعد كل خطوة.
+            StringBuilder log = new StringBuilder();
+            int[] modes = {AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION};
+            for (int m : modes) {
+                setModeTracked(a, m);
+                boolean ok2 = routeToBuiltInSpeaker(a);
+                boolean active = speakerActive(a);
+                log.append("mode").append(m).append("(now=").append(a.getMode()).append(") set=").append(ok2)
+                        .append(" dev=").append(commDeviceType(a)).append(" spk=").append(legacySpeakerOn(a))
+                        .append(" → ").append(active).append("; ");
+                if (active) break;
+            }
+            if (!speakerActive(a)) {
+                try {
+                    a.setSpeakerphoneOn(true);
+                } catch (Exception ignored) {
+                }
+                log.append("setSpeakerphoneOn → ").append(speakerActive(a)).append("; ");
+            }
+            lastOp = "ON 12+ ladder: " + log + (speakerActive(a) ? "✔" : "✘");
+            EventLog.add("audio " + lastOp);
+            if (speakerActive(a)) return;
+            // آخر احتياطي: setAudioRoute عبر InCallService (بيشتغل بس لو التطبيق هو الـ Default Dialer)
             DialerInCallService s = DialerInCallService.instance;
             if (s != null) {
                 try {
@@ -173,7 +198,7 @@ final class AudioControl {
                 } catch (Exception ignored) {
                 }
             }
-            return; // على 12+ مش بنكمّل لأي خطوات تانية
+            return;
         }
         // أندرويد < 31: تأخير 1100ms، وبعدين سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION.
         // بعد كل خطوة بنتأكد إن المكبر اشتغل فعلاً (isSpeakerphoneOn) قبل ما نكمّل للي بعدها.

@@ -5,7 +5,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.app.role.RoleManager;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
@@ -57,15 +56,23 @@ public class QueueService extends Service {
                 .addAction(android.R.drawable.ic_btn_speak_now, "ميوت", mute)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stop)
                 .build();
+        // زي التطبيق المرجعي: Foreground من نوع phoneCall دايماً (MANAGE_OWN_CALLS كفاية من غير Default Dialer).
+        // لو النظام رفضه، بنرجع لـ dataSync.
+        boolean started = false;
         try {
-            RoleManager rm = getSystemService(RoleManager.class);
-            boolean dialer = rm != null && rm.isRoleAvailable(RoleManager.ROLE_DIALER)
-                    && rm.isRoleHeld(RoleManager.ROLE_DIALER);
-            startForeground(1, n, dialer
-                    ? ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
-                    : ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL);
+            started = true;
+            EventLog.add("foreground service type: phoneCall");
         } catch (Exception e) {
-            stopSelf();
+            EventLog.add("phoneCall FGS rejected: " + e.getClass().getSimpleName());
+        }
+        if (!started) {
+            try {
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                EventLog.add("foreground service type: dataSync");
+            } catch (Exception e) {
+                stopSelf();
+            }
         }
         return START_NOT_STICKY;
     }

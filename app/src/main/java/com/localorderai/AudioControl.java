@@ -68,6 +68,8 @@ final class AudioControl {
             } catch (Exception ignored) {
             }
         }
+        DialerInCallService ics = DialerInCallService.instance;
+        b.append(" | ics ").append(ics == null ? "no" : ("yes " + ics.describeEndpoints()));
         b.append(" | ").append(lastOp);
         return b.toString();
     }
@@ -90,6 +92,8 @@ final class AudioControl {
     static boolean isSpeakerOn(Context c) {
         DialerInCallService s = liveIcs();
         if (s != null) {
+            Boolean ep = s.speakerFromEndpoint(); // أندرويد 14+: المصدر الرسمي
+            if (ep != null) return ep;
             CallAudioState st = s.getCallAudioState();
             return st != null && st.getRoute() == CallAudioState.ROUTE_SPEAKER;
         }
@@ -105,7 +109,14 @@ final class AudioControl {
     private static void applySpeaker(Context c, boolean on) {
         DialerInCallService s = liveIcs();
         if (s != null) {
+            // أندرويد 14+: CallEndpoint أولاً. لو مش متاح أو اترفض، setAudioRoute القديمة كاحتياطي.
+            if (s.requestSpeaker(on)) {
+                lastOp = "ICS requestCallEndpointChange " + (on ? "SPEAKER" : "EARPIECE");
+                return;
+            }
             s.setAudioRoute(on ? CallAudioState.ROUTE_SPEAKER : CallAudioState.ROUTE_WIRED_OR_EARPIECE);
+            lastOp = "ICS setAudioRoute " + (on ? "SPEAKER" : "EARPIECE");
+            EventLog.add("audio " + lastOp);
             return;
         }
         AudioManager a = am(c);

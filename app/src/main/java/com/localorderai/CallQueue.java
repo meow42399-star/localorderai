@@ -265,6 +265,9 @@ public final class CallQueue {
             onActive();
         } else {
             handler.postDelayed(ringTimeoutRunnable, ringTimeoutSec * 1000L);
+            // مرحلة الاتصال/الرنين: نثبّت المكبر بدري (ensure* آمنة ومش بتعمل حاجة لو مظبوط)،
+            // وبنعيد التأكيد برضو لما المكالمة تبقى ACTIVE (في onActive).
+            scheduleAudio(300, 1500);
         }
     }
 

@@ -398,13 +398,6 @@ public final class CallQueue {
                 callStartMs = SystemClock.elapsedRealtime();
                 notifyChanged();
                 AudioControl.newCall();
-                // المكبر: بيتفعّل بضغط زرار شاشة المكالمة (Accessibility)، والتكرار بيتابع ظهور الشاشة
-                if (autoSpeaker) {
-                    if (!SpeakerAccessibilityService.isConnected() && Build.VERSION.SDK_INT >= 31) {
-                        EventLog.add("speaker: خدمة المكبر (Accessibility) مش مفعّلة");
-                    }
-                    SpeakerAccessibilityService.request(true);
-                }
                 scheduleAudio(0, 800, 1500, 3000, 5000, 8000, 12000);
             }
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {
@@ -412,7 +405,6 @@ public final class CallQueue {
                 inCall = false;
                 long secs = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
                 handler.removeCallbacks(audioRunnable);
-                SpeakerAccessibilityService.stop();
                 record("انتهت — المدة " + secs + " ثانية");
                 if (app != null) AudioControl.reset(app);
                 scheduleNext();

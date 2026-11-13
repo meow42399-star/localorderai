@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
@@ -73,20 +74,7 @@
         <service
             android:name=".QueueService"
             android:exported="false"
-            android:foregroundServiceType="phoneCall|dataSync" />
-
-        <service
-            android:name=".SpeakerAccessibilityService"
-            android:exported="true"
-            android:label="LocalOrderAI - زر المكبر"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_config" />
-        </service>
+            android:foregroundServiceType="phoneCall|dataSync|mediaPlayback" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

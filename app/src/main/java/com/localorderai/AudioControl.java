@@ -7,15 +7,14 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.CallAudioState;
-import android.telecom.TelecomManager;
 
 /**
  * تحكم في المكبر والميوت.
  *
  *  - الوضع الكامل (التطبيق هو الـ Default Dialer ومعاه مكالمة حيّة): InCallService (CallEndpoint / setAudioRoute).
  *  - الوضع البسيط، المكبر:
- *      أندرويد 12+: النظام بيتجاهل طلبات مسار الصوت من تطبيق عادي أثناء مكالمة الشبكة،
- *                   فالمكبر بيتفعّل بالضغط على زرار شاشة المكالمة عن طريق SpeakerAccessibilityService.
+ *      أندرويد 12+: SpeakerRoute (setMode IN_COMMUNICATION + مسار صامت VOICE_COMMUNICATION
+ *                   + setCommunicationDevice + مستمع تغيّر الجهاز)، عشان التطبيق يفضل "مالك" مسار الصوت أثناء المكالمة.
  *      أندرويد 11 وأقل: AudioManager (سلّم أوضاع صوت مع التأكد من isSpeakerphoneOn).
  *  - الميوت (الوضعين): setMode(IN_CALL) ثم setMicrophoneMute بعد تأخير بسيط.
  *  - ensure* بتتحقق من الحالة الأول ومش بتعمل حاجة لو الحالة مظبوطة، فالتكرار بالتوقيتات آمن.
@@ -59,7 +58,7 @@ final class AudioControl {
         }
         DialerInCallService ics = DialerInCallService.instance;
         b.append(" | ics ").append(ics == null ? "no" : ("yes " + ics.describeEndpoints()));
-        b.append(" | acc ").append(SpeakerAccessibilityService.isConnected() ? "on" : "off");
+        b.append(" | route ").append(SpeakerRoute.get(c).describe());
         b.append(" | ").append(lastOp);
         return b.toString();
     }
@@ -90,59 +89,26 @@ final class AudioControl {
         return speakerActive(am(c));
     }
 
-/** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
+    /** أمر يدوي من المستخدم (بيتنفذ دايماً). قفل المكبر يدوياً بيوقف إعادة التفعيل التلقائي. */
     static void setSpeaker(Context c, boolean on) {
         userSpeakerOff = !on;
-        if (liveIcs() == null && Build.VERSION.SDK_INT >= 31) {
-            SpeakerAccessibilityService.request(on);
-            return;
-        }
         applySpeaker(c, on);
     }
 
-    /** آخر ضغطة يدوية على المكبر مرت على شاشة المكالمة (الواجهة بتعرض الحالة بعد لحظة). */
-    static volatile boolean lastToggleViaScreen;
-
-    /**
-     * زرار المكبر اليدوي (بيبدّل زي الزرار الحقيقي). بيرجّع رسالة قصيرة للمستخدم.
-     * الوضع البسيط على أندرويد 12+: بنجيب شاشة المكالمة قدّام (التطبيق نفسه ظاهر فمش هنشوف زرار المكبر)،
-     * وخدمة الـ Accessibility بتدوس على زرار المكبر مرة واحدة.
-     */
+    /** زرار المكبر اليدوي: بيبدّل الحالة فوراً زي زرار الميوت، وبيرجّع رسالة قصيرة للمستخدم. */
     static String toggleSpeaker(Context c) {
-        String m = doToggleSpeaker(c);
+        boolean on = !isSpeakerOn(c);
+        setSpeaker(c, on);
+        String m;
+        if (!on) {
+            m = "قفلت المكبر";
+        } else if (liveIcs() != null || Build.VERSION.SDK_INT < 31) {
+            m = "طلبت تشغيل المكبر";
+        } else {
+            m = isSpeakerOn(c) ? "المكبر شغال ✔" : "حاولت أشغّل المكبر لكن النظام لسه ما طبّقوش";
+        }
         EventLog.add("speaker toggle: " + m);
         return m;
-    }
-
-    private static String doToggleSpeaker(Context c) {
-        lastToggleViaScreen = false;
-        if (liveIcs() != null || Build.VERSION.SDK_INT < 31) {
-            boolean on = !isSpeakerOn(c);
-            setSpeaker(c, on);
-            return on ? "طلبت تشغيل المكبر" : "طلبت قفل المكبر";
-        }
-        if (!SpeakerAccessibilityService.isConnected()) {
-            return "فعّل خدمة المكبر (إمكانية الوصول) الأول";
-        }
-        if (!bringCallScreenToFront(c)) {
-            return "مفيش مكالمة شغالة (أو النظام رفض فتح شاشة المكالمة)";
-        }
-        userSpeakerOff = true; // المستخدم أخد القرار: التفعيل التلقائي ما يتدخلش
-        lastToggleViaScreen = true;
-        SpeakerAccessibilityService.requestToggle();
-        return "بيبدّل المكبر في شاشة المكالمة...";
-    }
-
-    private static boolean bringCallScreenToFront(Context c) {
-        try {
-            TelecomManager tm = (TelecomManager) c.getSystemService(Context.TELECOM_SERVICE);
-            if (tm == null || !tm.isInCall()) return false;
-            tm.showInCallScreen(false);
-            return true;
-        } catch (SecurityException e) {
-            EventLog.add("speaker: showInCallScreen اترفض (" + e.getClass().getSimpleName() + ")");
-            return false;
-        }
     }
 
     private static void applySpeaker(Context c, boolean on) {
@@ -159,8 +125,12 @@ final class AudioControl {
             return;
         }
         if (Build.VERSION.SDK_INT >= 31) {
-            // التفعيل بيتم بضغط زرار شاشة المكالمة. القفل مش محتاج حاجة: النظام بيرجّع المسار لوحده لما المكالمة تخلص.
-            if (on) SpeakerAccessibilityService.nudge();
+            if (on) {
+                lastOp = "route start → " + SpeakerRoute.get(c).start();
+            } else {
+                SpeakerRoute.get(c).stop(false);
+                lastOp = "route stop";
+            }
             return;
         }
         if (on) {
@@ -361,7 +331,7 @@ final class AudioControl {
         EventLog.add("audio reset (last op: " + lastOp + ")");
         MAIN.removeCallbacksAndMessages(TOKEN);
         stopRouteWatch(c);
-        SpeakerAccessibilityService.stop();
+        SpeakerRoute.get(c).stop(true);
         userSpeakerOff = false;
         applySpeaker(c, false);
         setMuted(c, false);

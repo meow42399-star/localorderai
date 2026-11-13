@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
     private EditText numbersEdit, ringEdit;
     private CheckBox speakerCheck, muteCheck;
     private TextView statusView, resultsView;
-    private Button roleBtn, accBtn, startBtn, stopBtn, updateBtn;
+    private Button roleBtn, startBtn, stopBtn, updateBtn;
     private TextView updateStatus;
     private UpdateManager updater;
     private SharedPreferences prefs;
@@ -100,17 +100,6 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 Toast.makeText(MainActivity.this, AudioControl.toggleSpeaker(MainActivity.this),
                         Toast.LENGTH_SHORT).show();
-                if (!AudioControl.lastToggleViaScreen) return;
-                // الحالة الفعلية بعد ما الخدمة تدوس (بتظهر لو رجعت للتطبيق)
-                v.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        Boolean st = SpeakerAccessibilityService.lastKnownState;
-                        Toast.makeText(MainActivity.this, "المكبر دلوقتي: "
-                                + (st == null ? "مش عارف (شوف شاشة المكالمة)" : (st ? "شغال" : "مقفول")),
-                                Toast.LENGTH_SHORT).show();
-                    }
-                }, 2500);
             }
         });
         liveMute.setOnClickListener(new View.OnClickListener() {
@@ -140,9 +129,6 @@ public class MainActivity extends Activity {
         roleBtn = new Button(this);
         roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
         root.addView(roleBtn);
-        accBtn = new Button(this);
-        accBtn.setText("تفعيل خدمة المكبر (إمكانية الوصول)");
-        root.addView(accBtn);
         startBtn = new Button(this);
         startBtn.setText("ابدأ");
         root.addView(startBtn);
@@ -226,15 +212,6 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         if (CrashLogger.read(this) != null) showCrashDialog();
 
-        accBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Toast.makeText(MainActivity.this,
-                        "فعّل «LocalOrderAI - زر المكبر». لو الخيار رمادي: إعدادات التطبيق ← ⋮ ← السماح بالإعدادات المقيّدة",
-                        Toast.LENGTH_LONG).show();
-                startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
-            }
-        });
         roleBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -423,16 +400,7 @@ public class MainActivity extends Activity {
         boolean full = hasDialerRole();
         st.append(full
                 ? "الوضع الكامل: التطبيق هو الاتصال الافتراضي (بيعرف مين قفل + مكبر مضمون)"
-                : "الوضع البسيط: المكبر بالضغط على زرار شاشة المكالمة، ومش بيعرف مين قفل");
-        boolean needAcc = !full && Build.VERSION.SDK_INT >= 31;
-        if (needAcc) {
-            st.append("\nخدمة المكبر: ")
-                    .append(SpeakerAccessibilityService.isConnected() ? "شغالة" : "مش مفعّلة (المكبر مش هيشتغل من غيرها)");
-            if (!SpeakerAccessibilityService.lastInfo.isEmpty()) {
-                st.append("\n").append(SpeakerAccessibilityService.lastInfo);
-            }
-        }
-        accBtn.setVisibility(needAcc && !SpeakerAccessibilityService.isConnected() ? View.VISIBLE : View.GONE);
+                : "الوضع البسيط: المكبر بالتحكم في مسار الصوت (حسب الموبايل)، ومش بيعرف مين قفل");
         if (q.isRunning()) {
             st.append("\nشغال: رقم ").append(q.getCurrentPosition()).append(" من ").append(q.getTotal());
         }

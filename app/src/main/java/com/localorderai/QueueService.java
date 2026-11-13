@@ -58,22 +58,24 @@ public class QueueService extends Service {
                 .build();
         // زي التطبيق المرجعي: Foreground من نوع phoneCall دايماً (MANAGE_OWN_CALLS كفاية من غير Default Dialer).
         // لو النظام رفضه، بنرجع لـ dataSync.
+        // المسار الصامت (SpeakerRoute) بيشغّل صوت، فبنجرّب نوع mediaPlayback مع phoneCall أولاً، وبعدين نرجع خطوة خطوة.
+        int[] types = {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC};
+        String[] names = {"phoneCall+mediaPlayback", "mediaPlayback", "phoneCall", "dataSync"};
         boolean started = false;
-        try {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL);
-            started = true;
-            EventLog.add("foreground service type: phoneCall");
-        } catch (Exception e) {
-            EventLog.add("phoneCall FGS rejected: " + e.getClass().getSimpleName());
-        }
-        if (!started) {
+        for (int i = 0; i < types.length && !started; i++) {
             try {
-                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-                EventLog.add("foreground service type: dataSync");
+                startForeground(1, n, types[i]);
+                started = true;
+                EventLog.add("foreground service type: " + names[i]);
             } catch (Exception e) {
-                stopSelf();
+                EventLog.add(names[i] + " FGS rejected: " + e.getClass().getSimpleName());
             }
         }
+        if (!started) stopSelf();
         return START_NOT_STICKY;
     }
 

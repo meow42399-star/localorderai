@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -21,6 +23,10 @@ public class SpeakerAccessibilityService extends AccessibilityService {
     private static final long MIN_WAIT_MS = 800;
     /** أقل فاصل بين ضغطتين. */
     private static final long CLICK_GAP_MS = 1200;
+    /** زرار المكبر اليدوي: أقل وقت قبل الضغطة (شاشة المكالمة لسه راجعة قدّام). */
+    private static final long TOGGLE_MIN_WAIT_MS = 400;
+    /** زرار المكبر اليدوي: لو شاشة المكالمة ما ظهرتش في المدة دي نلغي الطلب (عشان ما يتنفذش في وقت غلط). */
+    private static final long TOGGLE_TTL_MS = 25000;
 
     private static final Pattern SPEAKER = Pattern.compile(
             "speaker|loudspeaker|مكبر|مكبّر|haut-parleur|altavoz|lautsprecher|alto-falante|hoparl",
@@ -34,6 +40,13 @@ public class SpeakerAccessibilityService extends AccessibilityService {
     private static long startMs;
     private static long lastClickMs;
     private static String lastLogged = "";
+    /** وضع "بدّل مرة واحدة": ضغطة واحدة على زرار شاشة المكالمة بدل الوصول لحالة معينة. */
+    private static volatile boolean toggleMode;
+    /** وقت انتهاء الطلب (0 = من غير مهلة). */
+    private static long deadlineMs;
+
+    /** آخر حالة معروفة لزرار المكبر في شاشة المكالمة (null = مجهولة). */
+    static volatile Boolean lastKnownState;
 
     /** آخر حاجة الخدمة شافتها (للتشخيص، بتظهر في الشاشة الرئيسية وفي التقرير). */
     static volatile String lastInfo = "";
@@ -45,6 +58,8 @@ public class SpeakerAccessibilityService extends AccessibilityService {
     /** ابدأ دوّر على زر المكبر وخلّيه على الحالة المطلوبة. */
     static void request(boolean on) {
         want = on;
+        toggleMode = false;
+        deadlineMs = 0;
         active = true;
         attempts = 0;
         lastClickMs = 0;
@@ -53,9 +68,22 @@ public class SpeakerAccessibilityService extends AccessibilityService {
         nudge();
     }
 
+    /** زرار المكبر اليدوي: دوس مرة واحدة على زرار شاشة المكالمة (بيبدّل الحالة زي الزرار الحقيقي). */
+    static void requestToggle() {
+        toggleMode = true;
+        active = true;
+        attempts = 0;
+        lastClickMs = 0;
+        startMs = SystemClock.uptimeMillis();
+        deadlineMs = startMs + TOGGLE_TTL_MS;
+        note(instance == null ? "خدمة المكبر مش مفعّلة" : "بدّل المكبر: بدوّر على شاشة المكالمة...");
+        nudge();
+    }
+
     /** المكالمة خلصت أو الطابور وقف. */
     static void stop() {
         active = false;
+        toggleMode = false;
     }
 
     /** إعادة فحص من غير ما نصفّر عدّاد المحاولات (آمنة للتكرار). */
@@ -71,6 +99,15 @@ public class SpeakerAccessibilityService extends AccessibilityService {
             EventLog.add("speaker: " + text);
         }
     }
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private final Runnable readStateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            readState();
+        }
+    };
 
     @Override
     protected void onServiceConnected() {
@@ -95,6 +132,12 @@ public class SpeakerAccessibilityService extends AccessibilityService {
     }
 
     private void scan() {
+        if (deadlineMs != 0 && SystemClock.uptimeMillis() > deadlineMs) {
+            active = false;
+            toggleMode = false;
+            note("انتهت المهلة: شاشة المكالمة ما ظهرتش");
+            return;
+        }
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return;
         CharSequence p = root.getPackageName();
@@ -112,6 +155,24 @@ public class SpeakerAccessibilityService extends AccessibilityService {
         Boolean state = stateOf(n);
         String info = "شاشة المكالمة: " + pkg + " — زر المكبر: " + describe(n)
                 + " — حالته: " + (state == null ? "مجهولة" : (state ? "شغال" : "مقفول"));
+        lastKnownState = state;
+        if (toggleMode) {
+            if (SystemClock.uptimeMillis() - startMs < TOGGLE_MIN_WAIT_MS) {
+                note(info);
+                return;
+            }
+            AccessibilityNodeInfo t = clickableOf(n);
+            if (t == null) {
+                note(info + " — مش قابل للضغط");
+                return;
+            }
+            t.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            toggleMode = false;
+            active = false;
+            note(info + " — بدّلت المكبر");
+            handler.postDelayed(readStateRunnable, 700); // نقرا الحالة بعد الضغط
+            return;
+        }
         if (state != null && state == want) {
             active = false;
             note(info + " ✔");
@@ -139,6 +200,17 @@ public class SpeakerAccessibilityService extends AccessibilityService {
         attempts++;
         lastClickMs = now;
         note(info + " — دست عليه (" + attempts + ")");
+    }
+
+    /** قراءة حالة الزرار بعد الضغط (من غير أي ضغط). */
+    private void readState() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return;
+        AccessibilityNodeInfo n = find(root, 0);
+        if (n == null) return;
+        Boolean st = stateOf(n);
+        lastKnownState = st;
+        note("المكبر بعد الضغط: " + (st == null ? "حالته مجهولة (شوف شاشة المكالمة)" : (st ? "شغال" : "مقفول")));
     }
 
     @SuppressWarnings("deprecation")

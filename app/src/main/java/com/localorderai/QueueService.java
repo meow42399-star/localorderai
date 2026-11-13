@@ -21,7 +21,7 @@ public class QueueService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String act = intent == null ? null : intent.getAction();
         if (ACTION_SPEAKER.equals(act)) {
-            AudioControl.setSpeaker(this, !AudioControl.isSpeakerOn(this));
+            AudioControl.toggleSpeaker(this);
             return START_NOT_STICKY;
         }
         if (ACTION_MUTE.equals(act)) {

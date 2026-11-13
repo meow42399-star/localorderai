@@ -86,9 +86,33 @@ public class MainActivity extends Activity {
         muteCheck.setChecked(prefs.getBoolean("mute", false));
         root.addView(muteCheck);
 
+        LinearLayout liveRow = new LinearLayout(this);
+        liveRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button liveSpeaker = new Button(this);
+        liveSpeaker.setText("المكبر الآن: تشغيل/إيقاف");
         Button liveMute = new Button(this);
         liveMute.setText("الميوت الآن: تشغيل/إيقاف");
-        root.addView(liveMute);
+        liveRow.addView(liveSpeaker, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        liveRow.addView(liveMute, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(liveRow);
+        liveSpeaker.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this, AudioControl.toggleSpeaker(MainActivity.this),
+                        Toast.LENGTH_SHORT).show();
+                if (!AudioControl.lastToggleViaScreen) return;
+                // الحالة الفعلية بعد ما الخدمة تدوس (بتظهر لو رجعت للتطبيق)
+                v.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        Boolean st = SpeakerAccessibilityService.lastKnownState;
+                        Toast.makeText(MainActivity.this, "المكبر دلوقتي: "
+                                + (st == null ? "مش عارف (شوف شاشة المكالمة)" : (st ? "شغال" : "مقفول")),
+                                Toast.LENGTH_SHORT).show();
+                    }
+                }, 2500);
+            }
+        });
         liveMute.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {

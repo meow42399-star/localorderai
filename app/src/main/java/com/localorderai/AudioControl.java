@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.CallAudioState;
+import android.telecom.TelecomManager;
 
 /**
  * تحكم في المكبر والميوت.
@@ -97,6 +98,51 @@ final class AudioControl {
             return;
         }
         applySpeaker(c, on);
+    }
+
+    /** آخر ضغطة يدوية على المكبر مرت على شاشة المكالمة (الواجهة بتعرض الحالة بعد لحظة). */
+    static volatile boolean lastToggleViaScreen;
+
+    /**
+     * زرار المكبر اليدوي (بيبدّل زي الزرار الحقيقي). بيرجّع رسالة قصيرة للمستخدم.
+     * الوضع البسيط على أندرويد 12+: بنجيب شاشة المكالمة قدّام (التطبيق نفسه ظاهر فمش هنشوف زرار المكبر)،
+     * وخدمة الـ Accessibility بتدوس على زرار المكبر مرة واحدة.
+     */
+    static String toggleSpeaker(Context c) {
+        String m = doToggleSpeaker(c);
+        EventLog.add("speaker toggle: " + m);
+        return m;
+    }
+
+    private static String doToggleSpeaker(Context c) {
+        lastToggleViaScreen = false;
+        if (liveIcs() != null || Build.VERSION.SDK_INT < 31) {
+            boolean on = !isSpeakerOn(c);
+            setSpeaker(c, on);
+            return on ? "طلبت تشغيل المكبر" : "طلبت قفل المكبر";
+        }
+        if (!SpeakerAccessibilityService.isConnected()) {
+            return "فعّل خدمة المكبر (إمكانية الوصول) الأول";
+        }
+        if (!bringCallScreenToFront(c)) {
+            return "مفيش مكالمة شغالة (أو النظام رفض فتح شاشة المكالمة)";
+        }
+        userSpeakerOff = true; // المستخدم أخد القرار: التفعيل التلقائي ما يتدخلش
+        lastToggleViaScreen = true;
+        SpeakerAccessibilityService.requestToggle();
+        return "بيبدّل المكبر في شاشة المكالمة...";
+    }
+
+    private static boolean bringCallScreenToFront(Context c) {
+        try {
+            TelecomManager tm = (TelecomManager) c.getSystemService(Context.TELECOM_SERVICE);
+            if (tm == null || !tm.isInCall()) return false;
+            tm.showInCallScreen(false);
+            return true;
+        } catch (SecurityException e) {
+            EventLog.add("speaker: showInCallScreen اترفض (" + e.getClass().getSimpleName() + ")");
+            return false;
+        }
     }
 
     private static void applySpeaker(Context c, boolean on) {

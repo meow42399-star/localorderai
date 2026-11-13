@@ -79,6 +79,12 @@ public class MainActivity extends Activity {
         speakerCheck = new CheckBox(this);
         speakerCheck.setText("شغّل المكبر تلقائياً أول ما المكالمة ترد");
         speakerCheck.setChecked(prefs.getBoolean("speaker", true));
+        speakerCheck.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                prefs.edit().putBoolean("speaker", checked).apply();
+            }
+        });
         root.addView(speakerCheck);
 
         muteCheck = new CheckBox(this);
@@ -100,6 +106,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 Toast.makeText(MainActivity.this, AudioControl.toggleSpeaker(MainActivity.this),
                         Toast.LENGTH_SHORT).show();
+                speakerCheck.setChecked(prefs.getBoolean("speaker", true));
             }
         });
         liveMute.setOnClickListener(new View.OnClickListener() {
@@ -242,6 +249,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
+        speakerCheck.setChecked(prefs.getBoolean("speaker", true)); // ممكن اتغيّر من إشعار الطابور
         CallQueue.get().addListener(queueListener);
         render();
     }

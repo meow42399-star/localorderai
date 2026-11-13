@@ -58,13 +58,11 @@ public class QueueService extends Service {
                 .build();
         // زي التطبيق المرجعي: Foreground من نوع phoneCall دايماً (MANAGE_OWN_CALLS كفاية من غير Default Dialer).
         // لو النظام رفضه، بنرجع لـ dataSync.
-        // المسار الصامت (SpeakerRoute) بيشغّل صوت، فبنجرّب نوع mediaPlayback مع phoneCall أولاً، وبعدين نرجع خطوة خطوة.
+        // phoneCall (بيحتاج MANAGE_OWN_CALLS)، ولو النظام رفضه بنرجع لـ dataSync.
         int[] types = {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC};
-        String[] names = {"phoneCall+mediaPlayback", "mediaPlayback", "phoneCall", "dataSync"};
+        String[] names = {"phoneCall", "dataSync"};
         boolean started = false;
         for (int i = 0; i < types.length && !started; i++) {
             try {

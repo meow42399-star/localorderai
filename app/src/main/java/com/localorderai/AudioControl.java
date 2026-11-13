@@ -1,6 +1,7 @@
 package com.localorderai;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
@@ -12,10 +13,9 @@ import android.telecom.CallAudioState;
  * تحكم في المكبر والميوت.
  *
  *  - الوضع الكامل (التطبيق هو الـ Default Dialer ومعاه مكالمة حيّة): InCallService (CallEndpoint / setAudioRoute).
- *  - الوضع البسيط، المكبر:
- *      أندرويد 12+: SpeakerRoute (setMode IN_COMMUNICATION + مسار صامت VOICE_COMMUNICATION
- *                   + setCommunicationDevice + مستمع تغيّر الجهاز)، عشان التطبيق يفضل "مالك" مسار الصوت أثناء المكالمة.
- *      أندرويد 11 وأقل: AudioManager (سلّم أوضاع صوت مع التأكد من isSpeakerphoneOn).
+ *  - الوضع البسيط، المكبر: بيتحدد وقت طلب الاتصال نفسه (EXTRA_START_CALL_WITH_SPEAKERPHONE في CallQueue)
+ *      ونظام الاتصال (Telecom) هو اللي يشغّله، زي التطبيق المرجعي. تغيير المسار وسط المكالمة من تطبيق
+ *      عادي بيرفضه النظام على أندرويد 12+، فمش بنحاول. زرار المكبر هنا بيبدّل الإعداد للمكالمة الجاية.
  *  - الميوت (الوضعين): setMode(IN_CALL) ثم setMicrophoneMute بعد تأخير بسيط.
  *  - ensure* بتتحقق من الحالة الأول ومش بتعمل حاجة لو الحالة مظبوطة، فالتكرار بالتوقيتات آمن.
  *  - reset() آخر المكالمة بيرجّع المكبر والميوت ووضع الصوت.
@@ -23,7 +23,6 @@ import android.telecom.CallAudioState;
 final class AudioControl {
 
     /** تأخير 1100ms قبل setSpeakerphoneOn على أندرويد < 31، زي التطبيق المرجعي. */
-    private static final long SPEAKER_LEGACY_DELAY_MS = 1100;
     /** تأخير بسيط قبل الميوت بعد تغيير الوضع (200ms زي المرجع). */
     private static final long MUTE_DELAY_MS = 200;
 
@@ -58,7 +57,6 @@ final class AudioControl {
         }
         DialerInCallService ics = DialerInCallService.instance;
         b.append(" | ics ").append(ics == null ? "no" : ("yes " + ics.describeEndpoints()));
-        b.append(" | route ").append(SpeakerRoute.get(c).describe());
         b.append(" | ").append(lastOp);
         return b.toString();
     }
@@ -95,17 +93,22 @@ final class AudioControl {
         applySpeaker(c, on);
     }
 
-    /** زرار المكبر اليدوي: بيبدّل الحالة فوراً زي زرار الميوت، وبيرجّع رسالة قصيرة للمستخدم. */
+    /**
+     * زرار المكبر اليدوي، وبيرجّع رسالة قصيرة للمستخدم.
+     *  - الوضع الكامل ومعاه مكالمة حيّة: بيبدّل المكبر فوراً.
+     *  - غير كده: بيبدّل الإعداد المحفوظ، وبيتطبق من المكالمة الجاية (CallQueue بيقراه قبل كل اتصال).
+     */
     static String toggleSpeaker(Context c) {
-        boolean on = !isSpeakerOn(c);
-        setSpeaker(c, on);
         String m;
-        if (!on) {
-            m = "قفلت المكبر";
-        } else if (liveIcs() != null || Build.VERSION.SDK_INT < 31) {
-            m = "طلبت تشغيل المكبر";
+        if (liveIcs() != null) {
+            boolean on = !isSpeakerOn(c);
+            setSpeaker(c, on);
+            m = on ? "طلبت تشغيل المكبر" : "قفلت المكبر";
         } else {
-            m = isSpeakerOn(c) ? "المكبر شغال ✔" : "حاولت أشغّل المكبر لكن النظام لسه ما طبّقوش";
+            SharedPreferences sp = c.getSharedPreferences("prefs", Context.MODE_PRIVATE);
+            boolean on = !sp.getBoolean("speaker", true);
+            sp.edit().putBoolean("speaker", on).apply();
+            m = on ? "المكبر هيشتغل من المكالمة الجاية" : "المكبر هيتقفل من المكالمة الجاية";
         }
         EventLog.add("speaker toggle: " + m);
         return m;
@@ -124,20 +127,8 @@ final class AudioControl {
             EventLog.add("audio " + lastOp);
             return;
         }
-        if (Build.VERSION.SDK_INT >= 31) {
-            if (on) {
-                lastOp = "route start → " + SpeakerRoute.get(c).start();
-            } else {
-                SpeakerRoute.get(c).stop(false);
-                lastOp = "route stop";
-            }
-            return;
-        }
-        if (on) {
-            speakerOnLegacy(am(c));
-        } else {
-            speakerOffLegacy(am(c));
-        }
+        // الوضع البسيط: المكبر بيتحدد وقت طلب الاتصال ومش بيتغيّر وسط المكالمة.
+        lastOp = "basic: بيتحدد وقت الاتصال";
     }
 
     /**
@@ -153,30 +144,6 @@ final class AudioControl {
         if (on && liveIcs() == null && am(c).isBluetoothScoOn()) return false;
         applySpeaker(c, on);
         return isSpeakerOn(c) == on;
-    }
-
-    /** أندرويد 11 وأقل: بعد 1100ms سلّم أوضاع صوت IN_CALL ← NORMAL ← IN_COMMUNICATION، ونتأكد بعد كل خطوة. */
-    private static void speakerOnLegacy(final AudioManager a) {
-        MAIN.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (isBtScoOn(a)) return;
-                int[] modes = {AudioManager.MODE_IN_CALL, AudioManager.MODE_NORMAL,
-                        AudioManager.MODE_IN_COMMUNICATION};
-                StringBuilder log = new StringBuilder();
-                for (int m : modes) {
-                    if (legacySpeakerOn(a)) break;
-                    setModeTracked(a, m);
-                    try {
-                        a.setSpeakerphoneOn(true);
-                    } catch (Exception ignored) {
-                    }
-                    log.append("m").append(m).append("→").append(legacySpeakerOn(a)).append(' ');
-                }
-                lastOp = "ON legacy: " + log + (legacySpeakerOn(a) ? "✔" : "✘");
-                EventLog.add("audio " + lastOp);
-            }
-        }, SPEAKER_LEGACY_DELAY_MS);
     }
 
     /**
@@ -198,47 +165,6 @@ final class AudioControl {
             }
         }
         return sp;
-    }
-
-    /** أندرويد 11 وأقل: لو BT شغّال ما بنعملش حاجة. غير كده بعد 1100ms: setMode(IN_CALL) ← setSpeakerphoneOn(false) ← setMode(NORMAL). */
-    private static void speakerOffLegacy(final AudioManager a) {
-        // أندرويد < 31: لو BT شغّال ما بنعملش حاجة. غير كده تأخير 1100ms زي المرجع
-        if (isBtScoOn(a)) {
-            lastOp = "OFF: bt SCO on, skip";
-            return;
-        }
-        MAIN.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (!isBtScoOn(a)) {
-                    setModeTracked(a, AudioManager.MODE_IN_CALL);
-                    try {
-                        a.setSpeakerphoneOn(false);
-                    } catch (Exception ignored) {
-                    }
-                    setModeTracked(a, AudioManager.MODE_NORMAL);
-                    lastOp = "OFF: setSpeakerphoneOn(false) legacy";
-                }
-            }
-        }, SPEAKER_LEGACY_DELAY_MS);
-    }
-
-    @SuppressWarnings("deprecation")
-    private static boolean legacySpeakerOn(AudioManager a) {
-        try {
-            return a.isSpeakerphoneOn();
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    private static boolean isBtScoOn(AudioManager a) {
-        try {
-            return a.isBluetoothScoOn();
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     // ----------------------------------------------------------------- الميوت
@@ -331,7 +257,6 @@ final class AudioControl {
         EventLog.add("audio reset (last op: " + lastOp + ")");
         MAIN.removeCallbacksAndMessages(TOKEN);
         stopRouteWatch(c);
-        SpeakerRoute.get(c).stop(true);
         userSpeakerOff = false;
         applySpeaker(c, false);
         setMuted(c, false);

@@ -91,7 +91,8 @@ public final class CallQueue {
         public void run() {
             if (app == null) return;
             // بنتحقق من الحالة الأول (ensure*) فالتكرار آمن ومش بيقلب المكبر/الميوت
-            if (autoSpeaker) AudioControl.ensureSpeaker(app, true);
+            // الوضع البسيط: المكبر بيتحدد وقت طلب الاتصال (شوف next())، فمفيش محاولات وسط المكالمة
+            if (autoSpeaker && !basicMode) AudioControl.ensureSpeaker(app, true);
             if (autoMute) AudioControl.ensureMuted(app, true);
         }
     };
@@ -225,13 +226,18 @@ public final class CallQueue {
         timedOut = false;
         waitingForCall = true;
         notifyChanged();
-        // تطبيق المكبر/الميوت قبل الاتصال (زي الإعداد المسبق)
-        audioRunnable.run();
+        // الميوت بيتطبق قبل الاتصال
+        if (autoMute) AudioControl.ensureMuted(app, true);
+        // المكبر بنقرا إعداده من جديد قبل كل مكالمة، فتغييره (من الزرار أو الإشعار) بين مكالمتين بيتطبق على اللي بعدها
+        autoSpeaker = app.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("speaker", autoSpeaker);
         try {
             TelecomManager tm = (TelecomManager) app.getSystemService(Context.TELECOM_SERVICE);
             Bundle extras = new Bundle();
             if (account != null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account);
-            EventLog.add("placeCall #" + (index + 1) + " " + n + " sim=" + (account == null ? "default" : "chosen"));
+            // المكبر بيتحدد وقت طلب الاتصال نفسه: Telecom بيبدأ المكالمة على السماعة (زي التطبيق المرجعي)
+            if (autoSpeaker) extras.putBoolean(TelecomManager.EXTRA_START_CALL_WITH_SPEAKERPHONE, true);
+            EventLog.add("placeCall #" + (index + 1) + " " + n + " sim=" + (account == null ? "default" : "chosen")
+                    + " speakerExtra=" + autoSpeaker);
             tm.placeCall(Uri.fromParts("tel", n, null), extras);
         } catch (SecurityException e) {
             waitingForCall = false;

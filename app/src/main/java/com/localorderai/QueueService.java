@@ -29,6 +29,7 @@ public class QueueService extends Service {
             return START_NOT_STICKY;
         }
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            Intake.setEnabled(this, false);
             CallQueue.get().stop();
             stopSelf();
             return START_NOT_STICKY;

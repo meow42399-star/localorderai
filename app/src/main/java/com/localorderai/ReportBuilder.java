@@ -2,7 +2,6 @@ package com.localorderai;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.role.RoleManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -31,7 +30,7 @@ final class ReportBuilder {
         b.append("- الجهاز: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
                 .append(" | Android ").append(Build.VERSION.RELEASE)
                 .append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n");
-        b.append("- Default Dialer: ").append(hasRole(c) ? "نعم (الوضع الكامل)" : "لا (الوضع البسيط)").append('\n');
+        b.append("- Default Dialer: ").append(Roles.hasDialer(c) ? "نعم (الوضع الكامل)" : "لا (الوضع البسيط)").append('\n');
         b.append("- الصلاحيات: ")
                 .append(perm(c, Manifest.permission.CALL_PHONE, "CALL_PHONE")).append(' ')
                 .append(perm(c, Manifest.permission.READ_PHONE_STATE, "READ_PHONE_STATE")).append(' ')
@@ -85,10 +84,5 @@ final class ReportBuilder {
 
     private static String perm(Context c, String p, String name) {
         return name + (c.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED ? "✔" : "✘");
-    }
-
-    private static boolean hasRole(Context c) {
-        RoleManager rm = c.getSystemService(RoleManager.class);
-        return rm != null && rm.isRoleAvailable(RoleManager.ROLE_DIALER) && rm.isRoleHeld(RoleManager.ROLE_DIALER);
     }
 }

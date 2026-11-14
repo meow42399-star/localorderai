@@ -8,9 +8,11 @@ import android.service.notification.StatusBarNotification;
 import java.util.regex.Pattern;
 
 /**
- * بيقرا إشعار المكالمة الجارية (بتاع تطبيق الهاتف) وبيدوس على زرار المكبر اللي فيه لو موجود.
- * بيهتم بإشعارات المكالمات بس، ومش بيقرا ولا بيحفظ محتوى أي إشعار تاني.
- * بيسجّل في تقرير المشكلة أسماء أزرار إشعار المكالمة (مش نصه) عشان نعرف الموجود فعلاً.
+ * خدمة قراءة الإشعارات، وبتخدم حاجتين:
+ *  1) إشعار المكالمة الجارية (بتاع تطبيق الهاتف): بيدوس على زرار المكبر اللي فيه لو موجود،
+ *     وبيسجّل في تقرير المشكلة أسماء الأزرار (مش نص الإشعار).
+ *  2) إشعارات واتساب: بتتحوّل لـ Intake عشان يستقبل صور العملاء من الجروب المحدد.
+ * أي إشعار تاني بيتجاهل ومش بيتقرا ولا بيتحفظ.
  */
 public class CallNotificationService extends NotificationListenerService {
 
@@ -45,6 +47,10 @@ public class CallNotificationService extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
+        if (sbn != null && Intake.isWhatsApp(sbn.getPackageName())) {
+            Intake.onWhatsAppNotification(getApplicationContext(), sbn);
+            return;
+        }
         if (isCallNotification(sbn)) logOnce("call notification: " + describe(sbn));
     }
 

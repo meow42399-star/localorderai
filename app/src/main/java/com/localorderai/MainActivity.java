@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
 
     private static final int REQ_PERMS = 1;
     private static final int REQ_ROLE = 2;
+    private static final int REQ_IMAGES = 3;
 
     private EditText numbersEdit, ringEdit;
     private CheckBox speakerCheck, muteCheck;
@@ -43,7 +44,17 @@ public class MainActivity extends Activity {
     private UpdateManager updater;
     private SharedPreferences prefs;
     private Spinner simSpinner;
+    private EditText waGroupEdit, waKeyEdit;
+    private Button waToggleBtn;
+    private TextView waStatusView;
     private final List<PhoneAccountHandle> simHandles = new ArrayList<>();
+
+    private final Intake.Listener intakeListener = new Intake.Listener() {
+        @Override
+        public void onIntakeChanged() {
+            render();
+        }
+    };
 
     private final CallQueue.Listener queueListener = new CallQueue.Listener() {
         @Override
@@ -133,11 +144,37 @@ public class MainActivity extends Activity {
         root.addView(simSpinner);
         loadSims();
 
+        TextView waTitle = new TextView(this);
+        waTitle.setText("استقبال العملاء من واتساب");
+        waTitle.setTextSize(18);
+        waTitle.setPadding(0, 32, 0, 8);
+        root.addView(waTitle);
+        waGroupEdit = new EditText(this);
+        waGroupEdit.setHint("اسم الجروب (بالظبط)");
+        waGroupEdit.setText(Intake.group(this));
+        root.addView(waGroupEdit);
+        waKeyEdit = new EditText(this);
+        waKeyEdit.setHint("مفتاح Claude API (sk-ant-...)");
+        waKeyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        waKeyEdit.setText(Intake.apiKey(this));
+        root.addView(waKeyEdit);
+        waToggleBtn = new Button(this);
+        root.addView(waToggleBtn);
+        waToggleBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onIntakeToggle();
+            }
+        });
+        waStatusView = new TextView(this);
+        waStatusView.setPadding(0, 8, 0, 8);
+        root.addView(waStatusView);
+
         roleBtn = new Button(this);
         roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
         root.addView(roleBtn);
         notifBtn = new Button(this);
-        notifBtn.setText("تفعيل الوصول للإشعارات (زرار المكبر وسط المكالمة)");
+        notifBtn.setText("تفعيل الوصول للإشعارات (استقبال واتساب + زرار المكبر)");
         root.addView(notifBtn);
         startBtn = new Button(this);
         startBtn.setText("ابدأ");
@@ -263,12 +300,15 @@ public class MainActivity extends Activity {
         super.onStart();
         speakerCheck.setChecked(prefs.getBoolean("speaker", true)); // ممكن اتغيّر من إشعار الطابور
         CallQueue.get().addListener(queueListener);
+        Intake.addListener(intakeListener);
+        if (Intake.isEnabled(this)) startQueueService(); // لو التطبيق اتقفل واتفتح، الاستقبال يفضل شغّال
         render();
     }
 
     @Override
     protected void onStop() {
         CallQueue.get().removeListener(queueListener);
+        Intake.removeListener(intakeListener);
         super.onStop();
     }
 
@@ -315,9 +355,44 @@ public class MainActivity extends Activity {
     }
 
     private boolean hasDialerRole() {
-        RoleManager rm = getSystemService(RoleManager.class);
-        return rm != null && rm.isRoleAvailable(RoleManager.ROLE_DIALER)
-                && rm.isRoleHeld(RoleManager.ROLE_DIALER);
+        return Roles.hasDialer(this);
+    }
+
+    private void startQueueService() {
+        try {
+            startForegroundService(new Intent(this, QueueService.class));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void onIntakeToggle() {
+        if (Intake.isEnabled(this)) {
+            Intake.setEnabled(this, false);
+            if (!CallQueue.get().isRunning()) stopService(new Intent(this, QueueService.class));
+            render();
+            return;
+        }
+        String group = waGroupEdit.getText().toString().trim();
+        String key = waKeyEdit.getText().toString().trim();
+        if (group.isEmpty() || key.isEmpty()) {
+            Toast.makeText(this, "اكتب اسم الجروب ومفتاح الـ API الأول", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intake.save(this, group, key);
+        if (!Intake.hasImagePermission(this)) {
+            requestPermissions(Intake.imagePermissions(), REQ_IMAGES);
+            return;
+        }
+        enableIntake();
+    }
+
+    private void enableIntake() {
+        Intake.setEnabled(this, true);
+        startQueueService();
+        if (!CallNotificationService.isConnected()) {
+            Toast.makeText(this, "فعّل «الوصول للإشعارات» (الزرار اللي فوق) عشان الاستقبال يشتغل", Toast.LENGTH_LONG).show();
+        }
+        render();
     }
 
     private void requestDialerRole() {
@@ -355,6 +430,14 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
+        if (code == REQ_IMAGES) {
+            if (Intake.hasImagePermission(this)) {
+                enableIntake();
+            } else {
+                Toast.makeText(this, "لازم تسمح بالوصول للصور (اختار «السماح بالكل»)", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (code != REQ_PERMS) return;
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
             loadSims();
@@ -435,6 +518,13 @@ public class MainActivity extends Activity {
         startBtn.setEnabled(!q.isRunning());
         stopBtn.setEnabled(q.isRunning());
         roleBtn.setVisibility(hasDialerRole() ? View.GONE : View.VISIBLE);
-        notifBtn.setVisibility(!hasDialerRole() && !CallNotificationService.isConnected() ? View.VISIBLE : View.GONE);
+        notifBtn.setVisibility(CallNotificationService.isConnected() ? View.GONE : View.VISIBLE);
+        boolean wa = Intake.isEnabled(this);
+        waToggleBtn.setText(wa ? "إيقاف استقبال واتساب" : "تشغيل استقبال واتساب");
+        StringBuilder ws = new StringBuilder("الاستقبال: ").append(wa ? "شغّال" : "مقفول");
+        if (wa && !CallNotificationService.isConnected()) ws.append("\n⚠ فعّل الوصول للإشعارات وإلا مش هيستقبل");
+        String il = Intake.logText(this, 10);
+        if (!il.isEmpty()) ws.append("\n").append(il);
+        waStatusView.setText(ws.toString());
     }
 }

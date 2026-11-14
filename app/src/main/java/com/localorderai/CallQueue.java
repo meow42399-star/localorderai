@@ -2,6 +2,7 @@ package com.localorderai;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -189,6 +190,45 @@ public final class CallQueue {
         next();
     }
 
+    /**
+     * عميل جديد (من استقبال واتساب). لو الطابور شغّال بيتضاف في الآخر،
+     * وغير كده بيبدأ لوحده بإعدادات التطبيق المحفوظة (من غير مسح نتايج المكالمات السابقة).
+     */
+    public void add(Context ctx, String number) {
+        Context c = ctx.getApplicationContext();
+        if (running) {
+            numbers.add(number);
+            EventLog.add("queue add (running), total=" + numbers.size());
+            notifyChanged();
+            return;
+        }
+        SharedPreferences sp = c.getSharedPreferences("prefs", Context.MODE_PRIVATE);
+        app = c;
+        account = accountFromPrefs(c, sp.getInt("sim", 0));
+        ringTimeoutSec = Math.max(10, sp.getInt("ring", 45));
+        autoSpeaker = sp.getBoolean("speaker", true);
+        autoMute = sp.getBoolean("mute", false);
+        basicMode = !Roles.hasDialer(c);
+        EventLog.add("start from intake: basic=" + basicMode + ", speaker=" + autoSpeaker + ", mute=" + autoMute);
+        numbers.add(number);
+        index = numbers.size() - 2; // next() بيزوّده ويوصل للرقم الجديد
+        inCall = false;
+        running = true;
+        if (basicMode) startWatcher();
+        next();
+    }
+
+    private static PhoneAccountHandle accountFromPrefs(Context c, int simIndex) {
+        if (simIndex <= 0) return null;
+        try {
+            TelecomManager tm = (TelecomManager) c.getSystemService(Context.TELECOM_SERVICE);
+            java.util.List<PhoneAccountHandle> list = tm.getCallCapablePhoneAccounts();
+            return simIndex <= list.size() ? list.get(simIndex - 1) : null;
+        } catch (SecurityException e) {
+            return null;
+        }
+    }
+
     public void stop() {
         if (!running) return;
         EventLog.add("stop requested");
@@ -351,7 +391,8 @@ public final class CallQueue {
             inCall = false;
         }
         if (app != null && (autoSpeaker || autoMute)) AudioControl.reset(app);
-        if (app != null) {
+        // لو استقبال واتساب شغّال، الخدمة بتفضل شغّالة عشان الطابور يكمّل مع أي عميل جديد
+        if (app != null && !Intake.isEnabled(app)) {
             app.stopService(new Intent(app, QueueService.class));
         }
         notifyChanged();

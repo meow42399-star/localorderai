@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
     private EditText numbersEdit, ringEdit;
     private CheckBox speakerCheck, muteCheck;
     private TextView statusView, resultsView;
-    private Button roleBtn, startBtn, stopBtn, updateBtn;
+    private Button roleBtn, notifBtn, startBtn, stopBtn, updateBtn;
     private TextView updateStatus;
     private UpdateManager updater;
     private SharedPreferences prefs;
@@ -136,6 +136,9 @@ public class MainActivity extends Activity {
         roleBtn = new Button(this);
         roleBtn.setText("تفعيل كتطبيق الاتصال الافتراضي (اختياري)");
         root.addView(roleBtn);
+        notifBtn = new Button(this);
+        notifBtn.setText("تفعيل الوصول للإشعارات (زرار المكبر وسط المكالمة)");
+        root.addView(notifBtn);
         startBtn = new Button(this);
         startBtn.setText("ابدأ");
         root.addView(startBtn);
@@ -219,6 +222,15 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         if (CrashLogger.read(this) != null) showCrashDialog();
 
+        notifBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this,
+                        "فعّل «LocalOrderAI». لو الخيار رمادي: إعدادات التطبيق ← ⋮ ← السماح بالإعدادات المقيّدة",
+                        Toast.LENGTH_LONG).show();
+                startActivity(new Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+            }
+        });
         roleBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -408,7 +420,11 @@ public class MainActivity extends Activity {
         boolean full = hasDialerRole();
         st.append(full
                 ? "الوضع الكامل: التطبيق هو الاتصال الافتراضي (بيعرف مين قفل + مكبر مضمون)"
-                : "الوضع البسيط: المكبر بالتحكم في مسار الصوت (حسب الموبايل)، ومش بيعرف مين قفل");
+                : "الوضع البسيط: المكبر بيتحدد وقت الاتصال، ووسط المكالمة من زرار إشعار المكالمة. ومش بيعرف مين قفل");
+        if (!full) {
+            st.append("\nالوصول للإشعارات: ")
+                    .append(CallNotificationService.isConnected() ? "شغّال" : "مش مفعّل (زرار المكبر وسط المكالمة مش هيشتغل من غيره)");
+        }
         if (q.isRunning()) {
             st.append("\nشغال: رقم ").append(q.getCurrentPosition()).append(" من ").append(q.getTotal());
         }
@@ -419,5 +435,6 @@ public class MainActivity extends Activity {
         startBtn.setEnabled(!q.isRunning());
         stopBtn.setEnabled(q.isRunning());
         roleBtn.setVisibility(hasDialerRole() ? View.GONE : View.VISIBLE);
+        notifBtn.setVisibility(!hasDialerRole() && !CallNotificationService.isConnected() ? View.VISIBLE : View.GONE);
     }
 }

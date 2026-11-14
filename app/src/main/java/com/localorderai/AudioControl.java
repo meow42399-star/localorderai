@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.CallAudioState;
+import android.telecom.TelecomManager;
 
 /**
  * تحكم في المكبر والميوت.
@@ -96,6 +97,7 @@ final class AudioControl {
     /**
      * زرار المكبر اليدوي، وبيرجّع رسالة قصيرة للمستخدم.
      *  - الوضع الكامل ومعاه مكالمة حيّة: بيبدّل المكبر فوراً.
+     *  - الوضع البسيط ووسط مكالمة: بيدوس على زرار المكبر في إشعار المكالمة (CallNotificationService) لو موجود.
      *  - غير كده: بيبدّل الإعداد المحفوظ، وبيتطبق من المكالمة الجاية (CallQueue بيقراه قبل كل اتصال).
      */
     static String toggleSpeaker(Context c) {
@@ -104,6 +106,8 @@ final class AudioControl {
             boolean on = !isSpeakerOn(c);
             setSpeaker(c, on);
             m = on ? "طلبت تشغيل المكبر" : "قفلت المكبر";
+        } else if (inCall(c)) {
+            m = CallNotificationService.pressSpeaker();
         } else {
             SharedPreferences sp = c.getSharedPreferences("prefs", Context.MODE_PRIVATE);
             boolean on = !sp.getBoolean("speaker", true);
@@ -112,6 +116,16 @@ final class AudioControl {
         }
         EventLog.add("speaker toggle: " + m);
         return m;
+    }
+
+    /** هل فيه مكالمة شغّالة دلوقتي (أي مكالمة، مش بس من الطابور)؟ */
+    private static boolean inCall(Context c) {
+        try {
+            TelecomManager tm = (TelecomManager) c.getSystemService(Context.TELECOM_SERVICE);
+            return tm != null && tm.isInCall();
+        } catch (SecurityException e) {
+            return false;
+        }
     }
 
     private static void applySpeaker(Context c, boolean on) {

@@ -36,6 +36,8 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 dependencies {
+    // نسخة Kotlin واحدة لكل المكتبات (ML Kit وTesseract بيسحبوا نسخ مختلفة وبتتعارض)
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation 'androidx.core:core:1.13.1'
     // قراءة الورقة محلياً: ML Kit (لاتيني) + Tesseract (عربي وإنجليزي)
     implementation 'com.google.mlkit:text-recognition:16.0.1'

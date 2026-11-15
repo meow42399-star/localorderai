@@ -33,9 +33,27 @@ jobs:
       - name: Build release APK
         run: |
           chmod +x gradlew
+          set -o pipefail
           ./gradlew assembleRelease \
             -PappVersionName=${{ steps.version.outputs.version_name }} \
-            -PappVersionCode=${{ steps.version.outputs.version_code }}
+            -PappVersionCode=${{ steps.version.outputs.version_code }} 2>&1 | tee build.log
+
+      - name: Post build errors as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### Build failed - Gradle errors"
+            echo '```'
+            if [ -f build.log ]; then
+              grep -n -i -E "error:|FAILED|What went wrong|Could not|requires libraries|Caused by|Execution failed|Duplicate class|incompatible|not found" -A4 build.log | head -120
+            else
+              echo "no build.log (a step before the build failed)"
+            fi
+            echo '```'
+          } > fail.md
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -F body=@fail.md
 
       - name: Sign APK with the permanent key
         env:

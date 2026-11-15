@@ -33,8 +33,9 @@ import java.util.concurrent.Executors;
 
 /**
  * استقبال العملاء من جروب واتساب:
- * إشعار الجروب (CallNotificationService) ← أحدث صورة في مجلد واتساب ← Claude (الاسم/الرقم/التفاصيل)
- * ← فحص الرقم ← إضافة للطابور وبدء الاتصال تلقائياً.
+ * إشعار الجروب (CallNotificationService) ← أحدث صورة في مجلد واتساب ← قراءة محلية (LocalOcr: ML Kit + Tesseract،
+ * لازم قراءتين يتفقوا)، ولو فيه مفتاح Claude API (اختياري) بيتستخدم احتياطي ← فحص الرقم
+ * ← إضافة للطابور وبدء الاتصال تلقائياً.
  * الرقم المشكوك فيه أو المكرر ما بيتصلش بيه، وبيظهر في سجل الاستقبال.
  */
 final class Intake {
@@ -164,11 +165,6 @@ final class Intake {
 
     private static void process(Context c, long postMs) {
         try {
-            String key = apiKey(c);
-            if (key.isEmpty()) {
-                log(c, "error", "مفيش مفتاح API في الإعدادات");
-                return;
-            }
             if (!hasImagePermission(c)) {
                 log(c, "error", "مفيش صلاحية الصور (اختار «السماح بالكل»)");
                 return;
@@ -179,22 +175,43 @@ final class Intake {
                 return;
             }
             markSeen(c, ContentUris.parseId(img));
-
             Bitmap bmp = WhatsAppImages.load(c, img, 1600);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos);
-            VisionClient.Result r = VisionClient.extract(key, Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP));
 
-            String name = r.name == null ? "" : r.name.trim();
-            String who = name.isEmpty() ? "" : name + " — ";
-            String phone = PhoneNumbers.normalize(r.phone);
+            // القراءة المحلية (من غير إنترنت): قراءتين أو أكتر لازم يتفقوا على نفس الرقم
+            LocalOcr.Result lr = LocalOcr.read(c, bmp);
+            EventLog.add("ocr passes: mlkit=" + lr.mlkit + " tessRaw=" + lr.tessRaw + " tessPre=" + lr.tessPre
+                    + " agreed=" + (lr.number != null));
+            String phone = lr.number;
+            String name = lr.name == null ? "" : lr.name.trim();
+            String details = "";
+            double confidence = 1.0;
+
             if (phone == null) {
-                log(c, "review", who + "الرقم مش واضح أو مش موبايل مصري صالح" + shortDetails(r.details));
-                return;
+                String key = apiKey(c);
+                if (key.isEmpty()) {
+                    log(c, "review", "القراءات ما اتفقتش على رقم واحد (ML Kit: " + lr.mlkit + "، Tesseract: "
+                            + lr.tessRaw + "/" + lr.tessPre + ")، ما اتصلتش");
+                    return;
+                }
+                // احتياطي اختياري: Claude لو فيه مفتاح
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+                VisionClient.Result r = VisionClient.extract(key,
+                        Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP));
+                phone = PhoneNumbers.normalize(r.phone);
+                name = r.name == null ? "" : r.name.trim();
+                details = r.details;
+                confidence = r.confidence;
+                if (phone == null) {
+                    log(c, "review", (name.isEmpty() ? "" : name + " — ")
+                            + "الرقم مش واضح أو مش موبايل مصري صالح" + shortDetails(details));
+                    return;
+                }
             }
-            String shown = who + EventLog.mask(phone) + shortDetails(r.details);
-            if (r.confidence < MIN_CONFIDENCE) {
-                log(c, "review", shown + " — ثقة قليلة (" + Math.round(r.confidence * 100) + "%)، ما اتصلتش");
+
+            String shown = (name.isEmpty() ? "" : name + " — ") + EventLog.mask(phone) + shortDetails(details);
+            if (confidence < MIN_CONFIDENCE) {
+                log(c, "review", shown + " — ثقة قليلة (" + Math.round(confidence * 100) + "%)، ما اتصلتش");
                 return;
             }
             if (isDuplicate(c, phone)) {

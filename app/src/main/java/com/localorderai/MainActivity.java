@@ -154,7 +154,7 @@ public class MainActivity extends Activity {
         waGroupEdit.setText(Intake.group(this));
         root.addView(waGroupEdit);
         waKeyEdit = new EditText(this);
-        waKeyEdit.setHint("مفتاح Claude API (sk-ant-...)");
+        waKeyEdit.setHint("مفتاح Claude API (اختياري: احتياطي لو القراءة المحلية فشلت)");
         waKeyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         waKeyEdit.setText(Intake.apiKey(this));
         root.addView(waKeyEdit);
@@ -374,8 +374,8 @@ public class MainActivity extends Activity {
         }
         String group = waGroupEdit.getText().toString().trim();
         String key = waKeyEdit.getText().toString().trim();
-        if (group.isEmpty() || key.isEmpty()) {
-            Toast.makeText(this, "اكتب اسم الجروب ومفتاح الـ API الأول", Toast.LENGTH_LONG).show();
+        if (group.isEmpty()) {
+            Toast.makeText(this, "اكتب اسم الجروب الأول", Toast.LENGTH_LONG).show();
             return;
         }
         Intake.save(this, group, key);

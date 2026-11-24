@@ -31,7 +31,7 @@ import java.util.Locale;
  * - واردة: دايرة رد خضرا ودايرة رفض حمرا بحلقة شفافة.
  * - زرار إيقاف الطابور بيظهر كـ pill برتقالي فوق الكارت لما الطابور شغال.
  *
- * TODO: إضافة مكالمة / فيديو / كيباد (DTMF) / Send message لسه مش متوصلين.
+ * TODO: إضافة مكالمة / فيديو / كيباد (DTMF) / Send message لسه مش متوصلين (الأيقونات مؤقتة).
  */
 public class CallActivity extends Activity {
 
